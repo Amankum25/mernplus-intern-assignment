@@ -208,11 +208,14 @@ class StraddleExecutionManager:
 
             call_id = InstrumentId.from_str(pair.call_contract.instrument_id)
             put_id = InstrumentId.from_str(pair.put_contract.instrument_id)
+            existing_trade = state_persistence.state.get("active_trade")
+            trade_level = int(existing_trade.get("level", 2)) if (existing_trade and existing_trade.get("level")) else 2
+
             config = BTCShortStraddleConfig(
                 call_instrument_id=call_id,
                 put_instrument_id=put_id,
                 trade_size=Decimal(str(trade_size)),
-                level=2,
+                level=trade_level,
                 stop_loss_pct=Decimal("0.01"),
                 take_profit_pct=Decimal("0.02"),
                 simulated_execution=False,
@@ -230,7 +233,7 @@ class StraddleExecutionManager:
             self.is_running = True
 
             state_persistence.set_active_trade({
-                "level": 2,
+                "level": trade_level,
                 "simulated": False,
                 "trade_size": trade_size,
                 "atm_strike": strike,
@@ -252,7 +255,7 @@ class StraddleExecutionManager:
                 self._stop_event.clear()
                 self._stream_thread = threading.Thread(
                     target=self._run_market_loop,
-                    args=(pair, 2, trade_size, False),
+                    args=(pair, trade_level, trade_size, False),
                     daemon=True,
                 )
                 self._stream_thread.start()
