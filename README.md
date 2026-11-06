@@ -1,4 +1,5 @@
-# BTC Options Short Straddle using NautilusTrader & Bybit
+# mernplus intern assignment
+## BTC Options Short Straddle using NautilusTrader & Bybit
 
 A systematic options trading strategy built on **NautilusTrader** and integrated with **Bybit Demo Trading & Testnet**.
 
