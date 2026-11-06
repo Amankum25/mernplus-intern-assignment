@@ -1,0 +1,1376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NautilusTrader • BTC Options Straddle Terminal</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #06090f;
+      --card-bg: #0b111e;
+      --card-border: #1a2333;
+      --card-hover: #121c2f;
+      --text-main: #f1f5f9;
+      --text-muted: #8492a6;
+      --text-dim: #475569;
+      
+      --call-color: #00f0ff;
+      --call-bg: rgba(0, 240, 255, 0.06);
+      --call-border: rgba(0, 240, 255, 0.25);
+      
+      --put-color: #c084fc;
+      --put-bg: rgba(192, 132, 252, 0.06);
+      --put-border: rgba(192, 132, 252, 0.25);
+      
+      --pnl-green: #00f59b;
+      --pnl-green-bg: rgba(0, 245, 155, 0.1);
+      --pnl-red: #ff3366;
+      --pnl-red-bg: rgba(255, 51, 102, 0.1);
+      
+      --primary: #3b82f6;
+      --primary-hover: #2563eb;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    
+    body {
+      background: var(--bg);
+      color: var(--text-main);
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      background-image: 
+        radial-gradient(circle at 15% 10%, rgba(59, 130, 246, 0.08) 0%, transparent 40%),
+        radial-gradient(circle at 85% 10%, rgba(192, 132, 252, 0.06) 0%, transparent 40%);
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #06090f; }
+    ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #334155; }
+
+    /* Top Navigation Header */
+    header {
+      background: rgba(11, 17, 30, 0.85);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--card-border);
+      padding: 0.85rem 2rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 0.85rem;
+    }
+    .brand-icon {
+      background: linear-gradient(135deg, #00f0ff, #3b82f6, #c084fc);
+      width: 36px;
+      height: 36px;
+      border-radius: 9px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 0 15px rgba(0, 240, 255, 0.35);
+      color: #06090f;
+      font-weight: 900;
+      font-size: 1.1rem;
+    }
+    .brand-title h1 {
+      font-size: 1.05rem;
+      font-weight: 800;
+      letter-spacing: -0.3px;
+    }
+    .brand-title span {
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .header-stats {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+    .stat-pill {
+      background: #0f1728;
+      border: 1px solid var(--card-border);
+      padding: 0.45rem 0.85rem;
+      border-radius: 8px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.8rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .stat-pill .label { color: var(--text-muted); font-size: 0.72rem; }
+    .stat-pill .value { font-weight: 700; color: #fff; }
+    .status-pulse {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--pnl-green);
+      box-shadow: 0 0 8px var(--pnl-green);
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0% { box-shadow: 0 0 0 0 rgba(0, 245, 155, 0.6); }
+      70% { box-shadow: 0 0 0 8px rgba(0, 245, 155, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(0, 245, 155, 0); }
+    }
+
+    .btn-qa {
+      background: linear-gradient(135deg, #1e293b, #0f172a);
+      color: #38bdf8;
+      border: 1px solid #38bdf840;
+      padding: 0.45rem 1rem;
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: 700;
+      font-size: 0.8rem;
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      transition: all 0.2s;
+    }
+    .btn-qa:hover {
+      background: #38bdf8;
+      color: #06090f;
+      box-shadow: 0 0 15px rgba(56, 189, 248, 0.4);
+    }
+
+    /* Main Content */
+    main {
+      flex: 1;
+      max-width: 1280px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 1.5rem 1.75rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1.35rem;
+    }
+
+    /* ATM Discovery Strip */
+    .atm-panel {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 1.15rem 1.35rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.85rem;
+    }
+    .atm-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .atm-title {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: #38bdf8;
+    }
+    .atm-expiry {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      background: #0f1728;
+      padding: 0.25rem 0.65rem;
+      border-radius: 6px;
+      border: 1px solid var(--card-border);
+    }
+    
+    .strike-matrix-row {
+      display: flex;
+      gap: 0.65rem;
+      overflow-x: auto;
+      padding-bottom: 0.25rem;
+    }
+    .strike-chip {
+      flex: 1;
+      min-width: 130px;
+      background: #0a0f1d;
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 0.6rem 0.75rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.2rem;
+      text-align: center;
+      transition: all 0.2s;
+    }
+    .strike-chip.is-atm {
+      background: rgba(56, 189, 248, 0.1);
+      border: 1px solid #38bdf8;
+      box-shadow: 0 0 12px rgba(56, 189, 248, 0.25);
+    }
+    .strike-chip .strike-val {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 1rem;
+      font-weight: 800;
+      color: #fff;
+    }
+    .strike-chip.is-atm .strike-val { color: #38bdf8; }
+    .strike-chip .strike-dist {
+      font-size: 0.7rem;
+      color: var(--text-muted);
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .strike-chip.is-atm .strike-badge {
+      font-size: 0.65rem;
+      font-weight: 800;
+      color: #06090f;
+      background: #38bdf8;
+      border-radius: 4px;
+      padding: 0.1rem 0.4rem;
+      margin-top: 0.2rem;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    /* Core Straddle Terminal Card */
+    .terminal-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 14px;
+      padding: 1.5rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1.25rem;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+      position: relative;
+    }
+    .terminal-card.active-trade {
+      border: 1px solid rgba(0, 245, 155, 0.4);
+      box-shadow: 0 0 25px rgba(0, 245, 155, 0.1);
+    }
+
+    /* PnL & Status Banner */
+    .pnl-banner {
+      display: grid;
+      grid-template-columns: 2fr 1.2fr 1.2fr 1.2fr;
+      gap: 1rem;
+      background: #080d18;
+      border: 1px solid var(--card-border);
+      border-radius: 10px;
+      padding: 1.15rem 1.4rem;
+      align-items: center;
+    }
+    .hero-pnl {
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+    }
+    .hero-pnl .pnl-label {
+      font-size: 0.72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--text-muted);
+    }
+    .hero-pnl .pnl-value {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 2.1rem;
+      font-weight: 900;
+      line-height: 1;
+    }
+    .pnl-pos { color: var(--pnl-green); text-shadow: 0 0 15px rgba(0, 245, 155, 0.3); }
+    .pnl-neg { color: var(--pnl-red); text-shadow: 0 0 15px rgba(255, 51, 102, 0.3); }
+    .pnl-neutral { color: #94a3b8; }
+
+    .stat-box {
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+    }
+    .stat-box .title {
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .stat-box .num {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 1.15rem;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    /* Position Legs Grid (Call in Cyan, Put in Purple) */
+    .legs-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.15rem;
+    }
+    
+    .leg-card {
+      border-radius: 10px;
+      padding: 1.15rem 1.25rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.85rem;
+      position: relative;
+      transition: all 0.2s;
+    }
+    .leg-card.call {
+      background: var(--call-bg);
+      border: 1px solid var(--call-border);
+    }
+    .leg-card.put {
+      background: var(--put-bg);
+      border: 1px solid var(--put-border);
+    }
+    .leg-card.is-open {
+      animation: glowPulse 2.5s infinite alternate;
+    }
+    @keyframes glowPulse {
+      0% { box-shadow: 0 0 10px rgba(0, 240, 255, 0.1); }
+      100% { box-shadow: 0 0 20px rgba(0, 240, 255, 0.25); }
+    }
+
+    .leg-card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .leg-title {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-weight: 800;
+      font-size: 0.95rem;
+    }
+    .leg-card.call .leg-title { color: var(--call-color); }
+    .leg-card.put .leg-title { color: var(--put-color); }
+    
+    .leg-badge {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.72rem;
+      font-weight: 700;
+      padding: 0.2rem 0.55rem;
+      border-radius: 5px;
+    }
+    .leg-card.call .leg-badge { background: rgba(0, 240, 255, 0.15); color: var(--call-color); border: 1px solid var(--call-border); }
+    .leg-card.put .leg-badge { background: rgba(192, 132, 252, 0.15); color: var(--put-color); border: 1px solid var(--put-border); }
+
+    .contract-sym {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.92rem;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    .quote-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 0.5rem;
+      background: rgba(0, 0, 0, 0.3);
+      padding: 0.65rem 0.85rem;
+      border-radius: 8px;
+    }
+    .quote-item {
+      display: flex;
+      flex-direction: column;
+      gap: 0.15rem;
+    }
+    .quote-item .q-label { font-size: 0.68rem; color: var(--text-muted); }
+    .quote-item .q-val {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.95rem;
+      font-weight: 700;
+    }
+
+    /* Risk Targets Visual Corridor */
+    .risk-corridor {
+      background: #090e1a;
+      border: 1px solid var(--card-border);
+      border-radius: 10px;
+      padding: 0.85rem 1.25rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.82rem;
+    }
+    .target-pill {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .target-sl { color: var(--pnl-red); font-weight: 700; }
+    .target-tp { color: var(--pnl-green); font-weight: 700; }
+
+    /* Action Buttons Row */
+    .size-selector-strip {
+      background: #090e1b;
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 0.65rem 1rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.75rem;
+    }
+    .size-label {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+    .size-pills {
+      display: flex;
+      gap: 0.45rem;
+    }
+    .size-pill {
+      background: #111a2d;
+      border: 1px solid var(--card-border);
+      color: #94a3b8;
+      padding: 0.3rem 0.65rem;
+      border-radius: 6px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.75rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .size-pill.active {
+      background: rgba(56, 189, 248, 0.15);
+      border-color: #38bdf8;
+      color: #38bdf8;
+    }
+    .open-qty-badge {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.78rem;
+      background: #0f1728;
+      border: 1px solid var(--card-border);
+      padding: 0.3rem 0.65rem;
+      border-radius: 6px;
+      color: var(--text-muted);
+    }
+    .open-qty-badge strong { color: #fff; }
+
+    .action-row {
+      display: grid;
+      grid-template-columns: 1.2fr 1.5fr auto 1fr;
+      gap: 0.85rem;
+    }
+    .btn-scale {
+      background: linear-gradient(135deg, #7c3aed, #9333ea);
+      color: #fff;
+    }
+    .btn-scale:hover:not(:disabled) {
+      background: linear-gradient(135deg, #9333ea, #a855f7);
+      box-shadow: 0 0 20px rgba(168, 85, 247, 0.4);
+    }
+    .btn {
+      padding: 0.85rem 1.25rem;
+      border-radius: 10px;
+      border: none;
+      cursor: pointer;
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      font-weight: 700;
+      font-size: 0.95rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      transition: all 0.2s;
+    }
+    .btn:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+      filter: grayscale(0.8);
+    }
+    .btn-lvl1 {
+      background: linear-gradient(135deg, #1e3a8a, #2563eb);
+      color: #fff;
+    }
+    .btn-lvl1:hover:not(:disabled) {
+      background: linear-gradient(135deg, #2563eb, #3b82f6);
+      box-shadow: 0 0 20px rgba(59, 130, 246, 0.4);
+    }
+    .btn-lvl2 {
+      background: linear-gradient(135deg, #065f46, #059669);
+      color: #fff;
+    }
+    .btn-lvl2:hover:not(:disabled) {
+      background: linear-gradient(135deg, #059669, #10b981);
+      box-shadow: 0 0 20px rgba(16, 185, 129, 0.4);
+    }
+    .btn-close {
+      background: linear-gradient(135deg, #991b1b, #dc2626);
+      color: #fff;
+    }
+    .btn-close:hover:not(:disabled) {
+      background: linear-gradient(135deg, #dc2626, #ef4444);
+      box-shadow: 0 0 20px rgba(239, 68, 68, 0.4);
+    }
+
+    /* Interviewer Demo Shock Panel */
+    .shock-strip {
+      background: rgba(245, 158, 11, 0.05);
+      border: 1px dashed rgba(245, 158, 11, 0.3);
+      border-radius: 8px;
+      padding: 0.75rem 1rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .shock-strip p {
+      font-size: 0.8rem;
+      color: #fbbf24;
+      font-weight: 600;
+    }
+    .shock-btn-group {
+      display: flex;
+      gap: 0.6rem;
+    }
+    .btn-shock {
+      background: #172033;
+      border: 1px solid #334155;
+      color: #cbd5e1;
+      padding: 0.35rem 0.75rem;
+      border-radius: 6px;
+      font-size: 0.75rem;
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .btn-shock:hover {
+      background: #2563eb;
+      color: #fff;
+      border-color: #3b82f6;
+    }
+
+    /* Log Stream & History Tabs */
+    .tabs-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid var(--card-border);
+      padding-bottom: 0.5rem;
+    }
+    .tab-pills {
+      display: flex;
+      gap: 0.5rem;
+    }
+    .tab-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      font-weight: 700;
+      font-size: 0.85rem;
+      padding: 0.4rem 0.85rem;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .tab-btn.active {
+      background: #1e293b;
+      color: #38bdf8;
+    }
+    .tab-controls {
+      display: flex;
+      gap: 0.5rem;
+      align-items: center;
+    }
+    .btn-mini {
+      background: #0f1728;
+      border: 1px solid var(--card-border);
+      color: var(--text-muted);
+      padding: 0.25rem 0.55rem;
+      border-radius: 5px;
+      font-size: 0.72rem;
+      cursor: pointer;
+    }
+    .btn-mini:hover { color: #fff; border-color: #38bdf8; }
+
+    .terminal-container {
+      background: #050811;
+      border: 1px solid #162032;
+      border-radius: 8px;
+      padding: 0.85rem 1rem;
+      height: 250px;
+      overflow-y: auto;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.8rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+    }
+    .log-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.65rem;
+      line-height: 1.45;
+    }
+    .log-time { color: var(--text-dim); min-width: 65px; }
+    .log-badge {
+      font-size: 0.68rem;
+      font-weight: 700;
+      padding: 0.1rem 0.45rem;
+      border-radius: 4px;
+      text-transform: uppercase;
+      min-width: 70px;
+      text-align: center;
+    }
+    .badge-info { background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); }
+    .badge-success { background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); }
+    .badge-danger { background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); }
+    .badge-warning { background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); }
+    .badge-pnl-pos { background: rgba(0, 245, 155, 0.2); color: #00f59b; border: 1px solid rgba(0, 245, 155, 0.4); font-weight: 800; }
+    .badge-pnl-neg { background: rgba(255, 51, 102, 0.2); color: #ff3366; border: 1px solid rgba(255, 51, 102, 0.4); font-weight: 800; }
+    
+    .log-text { color: #cbd5e1; flex: 1; word-break: break-all; }
+    .log-text.highlight-pos { color: #00f59b; font-weight: 600; }
+    .log-text.highlight-neg { color: #ff3366; font-weight: 600; }
+
+    /* Trade History Table */
+    .history-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.78rem;
+    }
+    .history-table th {
+      text-align: left;
+      padding: 0.5rem;
+      color: var(--text-muted);
+      border-bottom: 1px solid var(--card-border);
+      font-weight: 600;
+    }
+    .history-table td {
+      padding: 0.55rem 0.5rem;
+      border-bottom: 1px solid #111a2c;
+    }
+
+    /* Modal */
+    .modal-overlay {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0, 0, 0, 0.8);
+      backdrop-filter: blur(8px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 200;
+      padding: 1.5rem;
+    }
+    .modal-box {
+      background: #0d1527;
+      border: 1px solid var(--card-border);
+      border-radius: 14px;
+      max-width: 850px;
+      width: 100%;
+      max-height: 85vh;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 20px 50px rgba(0,0,0,0.6);
+    }
+    .modal-header {
+      padding: 1.25rem 1.5rem;
+      border-bottom: 1px solid var(--card-border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .modal-header h3 { font-size: 1.15rem; font-weight: 800; color: #38bdf8; }
+    .modal-close { background: transparent; border: none; color: #fff; font-size: 1.5rem; cursor: pointer; }
+    .modal-body {
+      padding: 1.5rem;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 1.25rem;
+    }
+    .qa-card {
+      background: #080d19;
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 1rem 1.25rem;
+    }
+    .qa-q { font-weight: 700; color: #fff; margin-bottom: 0.4rem; font-size: 0.92rem; }
+    .qa-a { color: var(--text-muted); font-size: 0.85rem; line-height: 1.5; white-space: pre-line; }
+
+    @media (max-width: 900px) {
+      .legs-grid, .pnl-banner, .action-row { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top Navigation Header -->
+  <header>
+    <div class="brand">
+      <div class="brand-icon">⚡</div>
+      <div class="brand-title">
+        <h1>NautilusTrader • BTC Options Straddle</h1>
+        <span>QUANTITATIVE EXECUTION TERMINAL • BYBIT V5</span>
+      </div>
+    </div>
+    <div class="header-stats">
+      <div class="stat-pill">
+        <div class="status-pulse"></div>
+        <span class="label">ENGINE:</span>
+        <span class="value" id="engineEnv">BYBIT DEMO</span>
+      </div>
+      <div class="stat-pill">
+        <span class="label">EQUITY:</span>
+        <span class="value" id="walletBalance">$49,925.56 USDT</span>
+      </div>
+      <div class="stat-pill">
+        <span class="label">BTC INDEX:</span>
+        <span class="value" id="btcIndexHeader">$76,054.10</span>
+      </div>
+      <div class="stat-pill">
+        <span class="label">REALIZED PnL:</span>
+        <span class="value pnl-pos" id="cumPnlText">+$0.00</span>
+      </div>
+      <button class="btn-qa" onclick="openModal()">
+        <span>📚</span> 10 Interview Q&A
+      </button>
+    </div>
+  </header>
+
+  <main>
+    <!-- ATM Strike Discovery Matrix -->
+    <section class="atm-panel">
+      <div class="atm-header">
+        <div class="atm-title">
+          <span>🎯</span> Dynamic ATM Strike Discovery Matrix (Level 1 Requirement)
+        </div>
+        <div class="atm-expiry" id="expiryLabel">
+          Expiry: 07 NOV 2026 08:00 UTC (Next Delivery)
+        </div>
+      </div>
+      <div class="strike-matrix-row" id="strikeMatrixRow">
+        <div class="strike-chip"><span class="strike-val">$75,000</span><span class="strike-dist">Δ $1,054</span></div>
+        <div class="strike-chip"><span class="strike-val">$75,500</span><span class="strike-dist">Δ $554</span></div>
+        <div class="strike-chip is-atm">
+          <span class="strike-val">$76,000</span>
+          <span class="strike-dist">Δ $54.10 (Closest)</span>
+          <span class="strike-badge">ATM Strike Selected</span>
+        </div>
+        <div class="strike-chip"><span class="strike-val">$76,500</span><span class="strike-dist">Δ $446</span></div>
+        <div class="strike-chip"><span class="strike-val">$77,000</span><span class="strike-dist">Δ $946</span></div>
+      </div>
+    </section>
+
+    <!-- Core Straddle Control & Live Valuation -->
+    <section class="terminal-card" id="mainTerminalCard">
+      <!-- PnL & Status Banner -->
+      <div class="pnl-banner">
+        <div class="hero-pnl">
+          <span class="pnl-label">Live Straddle PnL (Ask Valuation)</span>
+          <span class="pnl-value pnl-neutral" id="pnlHeroText">+0.00% ($0.00)</span>
+        </div>
+        <div class="stat-box">
+          <span class="title">Combined Entry</span>
+          <span class="num" id="combinedEntryText">$0.00</span>
+        </div>
+        <div class="stat-box">
+          <span class="title">Buyback Cost</span>
+          <span class="num" id="buybackCostText">$0.00</span>
+        </div>
+        <div class="stat-box">
+          <span class="title">Strategy State</span>
+          <span class="num" id="stateText" style="color:#38bdf8;">IDLE</span>
+        </div>
+      </div>
+
+      <!-- Distinct Call & Put Legs Grid -->
+      <div class="legs-grid">
+        <!-- Call Leg (Electric Cyan) -->
+        <div class="leg-card call" id="callCard">
+          <div class="leg-card-header">
+            <div class="leg-title">
+              <span>📈</span> CALL OPTION (SELL LEG)
+            </div>
+            <div class="leg-badge" id="callStatusBadge">READY TO SELL</div>
+          </div>
+          <div class="contract-sym" id="callSymbolText">BTC-7NOV26-76000-C-USDT</div>
+          <div class="quote-grid">
+            <div class="quote-item">
+              <span class="q-label">Entry Fill:</span>
+              <span class="q-val" id="callEntryText">$0.00</span>
+            </div>
+            <div class="quote-item">
+              <span class="q-label">Live Ask:</span>
+              <span class="q-val" id="callAskText" style="color:var(--call-color);">$0.00</span>
+            </div>
+            <div class="quote-item">
+              <span class="q-label">Live Bid:</span>
+              <span class="q-val" id="callBidText">$0.00</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Put Leg (Electric Purple) -->
+        <div class="leg-card put" id="putCard">
+          <div class="leg-card-header">
+            <div class="leg-title">
+              <span>📉</span> PUT OPTION (SELL LEG)
+            </div>
+            <div class="leg-badge" id="putStatusBadge">READY TO SELL</div>
+          </div>
+          <div class="contract-sym" id="putSymbolText">BTC-7NOV26-76000-P-USDT</div>
+          <div class="quote-grid">
+            <div class="quote-item">
+              <span class="q-label">Entry Fill:</span>
+              <span class="q-val" id="putEntryText">$0.00</span>
+            </div>
+            <div class="quote-item">
+              <span class="q-label">Live Ask:</span>
+              <span class="q-val" id="putAskText" style="color:var(--put-color);">$0.00</span>
+            </div>
+            <div class="quote-item">
+              <span class="q-label">Live Bid:</span>
+              <span class="q-val" id="putBidText">$0.00</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Risk Corridor Targets -->
+      <div class="risk-corridor">
+        <div class="target-pill">
+          <span>🛑 Stop-Loss (+1%):</span>
+          <span class="target-sl" id="slTargetVal">$0.00</span>
+        </div>
+        <div class="target-pill">
+          <span>⚖️ Status:</span>
+          <span id="riskDistanceText" style="color:var(--text-muted);">Awaiting Execution</span>
+        </div>
+        <div class="target-pill">
+          <span>🎯 Take-Profit (-2%):</span>
+          <span class="target-tp" id="tpTargetVal">$0.00</span>
+        </div>
+      </div>
+
+      <!-- Trade Size & Multiple Positions Selector -->
+      <div class="size-selector-strip">
+        <div class="size-label">
+          <span>📦</span> <strong>Trade Size (Multiple Contracts / Lots):</strong>
+        </div>
+        <div class="size-pills">
+          <button class="size-pill active" id="pill-001" onclick="setSize(0.01)">0.01 BTC (1 Lot)</button>
+          <button class="size-pill" id="pill-002" onclick="setSize(0.02)">0.02 BTC (2 Lots)</button>
+          <button class="size-pill" id="pill-005" onclick="setSize(0.05)">0.05 BTC (5 Lots)</button>
+          <button class="size-pill" id="pill-010" onclick="setSize(0.10)">0.10 BTC (10 Lots)</button>
+        </div>
+        <div class="open-qty-badge" id="openQtyBadge">
+          Open: <strong>0.00 BTC</strong>
+        </div>
+      </div>
+
+      <!-- Action Buttons -->
+      <div class="action-row">
+        <button id="btnLevel1" class="btn btn-lvl1" onclick="startStraddle(1)">
+          ⚡ Execute Level 1 (Naked Straddle)
+        </button>
+        <button id="btnLevel2" class="btn btn-lvl2" onclick="startStraddle(2)">
+          🛡️ Execute Level 2 (1% SL / 2% TP)
+        </button>
+        <button id="btnScaleIn" class="btn btn-scale" onclick="scaleIn()" style="display:none;">
+          ➕ Add Position (Scale In)
+        </button>
+        <button id="btnCloseAll" class="btn btn-close" onclick="stopStraddle()">
+          🛑 Close Positions (reduce_only=True)
+        </button>
+      </div>
+
+      <!-- Interviewer Shock Strip -->
+      <div class="shock-strip">
+        <p>💡 <strong>Interviewer Demo Panel:</strong> Simulate live price movements to trigger automated exits:</p>
+        <div class="shock-btn-group">
+          <button class="btn-shock" onclick="triggerShock('STOP_LOSS')">⚡ Trigger +1.5% SL Shock</button>
+          <button class="btn-shock" onclick="triggerShock('TAKE_PROFIT')">⚡ Trigger -2.5% TP Shock</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Logs & History Section -->
+    <section class="terminal-card">
+      <div class="tabs-header">
+        <div class="tab-pills">
+          <button class="tab-btn active" onclick="switchTab('logs')">Execution Logs & 5s PnL Feed</button>
+          <button class="tab-btn" onclick="switchTab('history')">Trade History & Realized PnL</button>
+        </div>
+        <div class="tab-controls">
+          <button class="btn-mini" onclick="clearLogs()">Clear Logs</button>
+          <button class="btn-mini" onclick="refreshSession()">Refresh (5s Sync)</button>
+        </div>
+      </div>
+
+      <!-- Tab 1: Structured Execution Logs -->
+      <div id="tabLogs" class="terminal-container">
+        <!-- Rendered dynamically -->
+      </div>
+
+      <!-- Tab 2: Trade History Table -->
+      <div id="tabHistory" class="terminal-container" style="display:none;">
+        <table class="history-table">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Level</th>
+              <th>Strike</th>
+              <th>Entry Premium</th>
+              <th>Exit Buyback</th>
+              <th>Realized PnL %</th>
+              <th>Realized PnL ($)</th>
+              <th>Exit Reason</th>
+              <th>Closed At</th>
+            </tr>
+          </thead>
+          <tbody id="historyTableBody">
+            <!-- Rendered dynamically -->
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <!-- 10 Interview Q&A Modal -->
+  <div class="modal-overlay" id="qaModal">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3>Interview Technical Walkthrough • 10 Questions</h3>
+        <button class="modal-close" onclick="closeModal()">&times;</button>
+      </div>
+      <div class="modal-body" id="qaBody">
+        <p style="color:var(--text-muted);">Loading walkthrough answers...</p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // State management
+    let activeTrade = null;
+    let ws = null;
+    let autoScroll = true;
+    let selectedTradeSize = 0.01;
+
+    function setSize(sz) {
+      selectedTradeSize = sz;
+      document.querySelectorAll('.size-pill').forEach(p => p.classList.remove('active'));
+      const key = sz === 0.01 ? 'pill-001' : (sz === 0.02 ? 'pill-002' : (sz === 0.05 ? 'pill-005' : 'pill-010'));
+      const el = document.getElementById(key);
+      if (el) el.classList.add('active');
+    }
+
+    // Connect WebSocket
+    function initWebSocket() {
+      const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      ws = new WebSocket(`${proto}//${window.location.host}/ws/stream`);
+
+      ws.onmessage = (e) => {
+        try {
+          const msg = JSON.parse(e.data);
+          handleLiveEvent(msg);
+        } catch (err) {
+          console.error('WS Parse Error:', err);
+        }
+      };
+
+      ws.onclose = () => {
+        setTimeout(initWebSocket, 2000);
+      };
+    }
+
+    // On initial page load: fetch persistent session to guarantee zero data loss
+    async function refreshSession() {
+      try {
+        const res = await fetch('/api/session');
+        const data = await res.json();
+        
+        // Cumulative PnL in header
+        if (data.stats) {
+          const cumPnl = data.stats.cumulative_pnl_usd || 0;
+          const sign = cumPnl >= 0 ? '+' : '';
+          const el = document.getElementById('cumPnlText');
+          el.innerText = `${sign}$${cumPnl.toFixed(2)}`;
+          el.className = `value ${cumPnl >= 0 ? 'pnl-pos' : 'pnl-neg'}`;
+        }
+
+        // Render persistent logs
+        if (data.logs) {
+          renderLogs(data.logs);
+        }
+
+        // Render trade history
+        if (data.trade_history) {
+          renderHistory(data.trade_history);
+        }
+
+        // Active Trade rehydration
+        if (data.active_trade && data.active_trade.is_active) {
+          applyActiveTrade(data.active_trade);
+        } else {
+          resetTradeCard();
+        }
+
+        // Account balance & environment
+        if (data.environment) {
+          document.getElementById('engineEnv').innerText = `BYBIT ${data.environment}`;
+        }
+      } catch (err) {
+        console.error('Failed to load session:', err);
+      }
+    }
+
+    // Refresh live market strikes & index every 5s
+    async function refreshMarket() {
+      try {
+        const res = await fetch('/api/market');
+        const data = await res.json();
+        if (data.btc_price) {
+          document.getElementById('btcIndexHeader').innerText = `$${data.btc_price.toLocaleString('en-US', {minimumFractionDigits:2})}`;
+        }
+        if (data.expiry_str) {
+          document.getElementById('expiryLabel').innerText = `Target Expiry: ${data.expiry_str}`;
+        }
+        if (data.strike_matrix && data.strike_matrix.length > 0) {
+          renderStrikeMatrix(data.strike_matrix, data.atm_strike);
+        }
+      } catch (err) {
+        console.error('Failed to refresh market:', err);
+      }
+    }
+
+    async function refreshAccount() {
+      try {
+        const res = await fetch('/api/account');
+        const data = await res.json();
+        if (data.totalWalletBalance) {
+          const bal = parseFloat(data.totalWalletBalance).toLocaleString('en-US', {minimumFractionDigits:2});
+          document.getElementById('walletBalance').innerText = `$${bal} USDT`;
+        }
+      } catch (err) {}
+    }
+
+    // Render Strike Matrix
+    function renderStrikeMatrix(matrix, atmStrike) {
+      const container = document.getElementById('strikeMatrixRow');
+      container.innerHTML = '';
+      matrix.forEach(item => {
+        const chip = document.createElement('div');
+        chip.className = `strike-chip ${item.is_atm ? 'is-atm' : ''}`;
+        chip.innerHTML = `
+          <span class="strike-val">$${item.strike.toLocaleString()}</span>
+          <span class="strike-dist">Δ $${item.distance.toFixed(2)}</span>
+          ${item.is_atm ? '<span class="strike-badge">ATM Strike Selected</span>' : ''}
+        `;
+        container.appendChild(chip);
+      });
+    }
+
+    // Render Logs
+    function renderLogs(logs) {
+      const container = document.getElementById('tabLogs');
+      container.innerHTML = '';
+      logs.forEach(log => appendLogRow(log, false));
+      if (autoScroll) container.scrollTop = container.scrollHeight;
+    }
+
+    function appendLogRow(log, scroll = true) {
+      const container = document.getElementById('tabLogs');
+      const row = document.createElement('div');
+      row.className = 'log-row';
+
+      let badgeClass = 'badge-info';
+      if (log.badge_type === 'success') badgeClass = 'badge-success';
+      if (log.badge_type === 'danger') badgeClass = 'badge-danger';
+      if (log.badge_type === 'warning') badgeClass = 'badge-warning';
+      if (log.badge_type === 'pnl-pos') badgeClass = 'badge-pnl-pos';
+      if (log.badge_type === 'pnl-neg') badgeClass = 'badge-pnl-neg';
+
+      let textClass = 'log-text';
+      if (log.badge_type === 'pnl-pos') textClass += ' highlight-pos';
+      if (log.badge_type === 'pnl-neg') textClass += ' highlight-neg';
+
+      row.innerHTML = `
+        <span class="log-time">[${log.time || ''}]</span>
+        <span class="log-badge ${badgeClass}">${log.category || 'INFO'}</span>
+        <span class="${textClass}">${log.message || ''}</span>
+      `;
+      container.appendChild(row);
+      if (scroll && autoScroll) container.scrollTop = container.scrollHeight;
+    }
+
+    // Render History
+    function renderHistory(history) {
+      const tbody = document.getElementById('historyTableBody');
+      tbody.innerHTML = '';
+      if (history.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="9" style="text-align:center; color:var(--text-muted); padding:1.5rem;">No completed trades yet.</td></tr>';
+        return;
+      }
+      history.slice().reverse().forEach(h => {
+        const tr = document.createElement('tr');
+        const pnlCls = h.pnl_usd >= 0 ? 'pnl-pos' : 'pnl-neg';
+        const sign = h.pnl_usd >= 0 ? '+' : '';
+        tr.innerHTML = `
+          <td style="color:#38bdf8;">${h.id}</td>
+          <td>Level ${h.level}</td>
+          <td>$${h.atm_strike.toLocaleString()}</td>
+          <td>$${h.combined_entry_premium.toFixed(2)}</td>
+          <td>$${h.exit_buyback_premium.toFixed(2)}</td>
+          <td class="${pnlCls}">${sign}${h.pnl_pct.toFixed(2)}%</td>
+          <td class="${pnlCls}">${sign}$${h.pnl_usd.toFixed(2)}</td>
+          <td style="color:var(--text-muted);">${h.exit_reason}</td>
+          <td style="color:var(--text-muted);">${h.closed_at}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    // Apply Active Trade State to UI
+    function applyActiveTrade(trade) {
+      activeTrade = trade;
+      document.getElementById('mainTerminalCard').classList.add('active-trade');
+      document.getElementById('stateText').innerText = `RUNNING [L${trade.level}]`;
+      document.getElementById('stateText').style.color = '#00f59b';
+
+      const sz = trade.trade_size || 0.01;
+      document.getElementById('openQtyBadge').innerHTML = `Open: <strong>${sz} BTC</strong> Short`;
+      document.getElementById('btnScaleIn').style.display = 'inline-flex';
+      document.getElementById('btnLevel1').disabled = false;
+      document.getElementById('btnLevel2').disabled = false;
+      document.getElementById('btnCloseAll').disabled = false;
+
+      // Leg symbols
+      if (trade.call_symbol) document.getElementById('callSymbolText').innerText = trade.call_symbol;
+      if (trade.put_symbol) document.getElementById('putSymbolText').innerText = trade.put_symbol;
+
+      // Entry fills
+      if (trade.call_entry_price) document.getElementById('callEntryText').innerText = `$${trade.call_entry_price.toFixed(2)}`;
+      if (trade.put_entry_price) document.getElementById('putEntryText').innerText = `$${trade.put_entry_price.toFixed(2)}`;
+      if (trade.combined_entry_premium) document.getElementById('combinedEntryText').innerText = `$${trade.combined_entry_premium.toFixed(2)}`;
+
+      // Live Asks
+      if (trade.call_ask) document.getElementById('callAskText').innerText = `$${trade.call_ask.toFixed(2)}`;
+      if (trade.put_ask) document.getElementById('putAskText').innerText = `$${trade.put_ask.toFixed(2)}`;
+      if (trade.call_bid) document.getElementById('callBidText').innerText = `$${trade.call_bid.toFixed(2)}`;
+      if (trade.put_bid) document.getElementById('putBidText').innerText = `$${trade.put_bid.toFixed(2)}`;
+
+      if (trade.current_buyback_premium) {
+        document.getElementById('buybackCostText').innerText = `$${trade.current_buyback_premium.toFixed(2)}`;
+      }
+
+      // Targets
+      if (trade.stop_loss_target) document.getElementById('slTargetVal').innerText = `$${trade.stop_loss_target.toFixed(2)}`;
+      if (trade.take_profit_target) document.getElementById('tpTargetVal').innerText = `$${trade.take_profit_target.toFixed(2)}`;
+
+      // PnL
+      updatePnlDisplay(trade.pnl_pct || 0, trade.pnl_usd || 0);
+
+      // Card active glows
+      document.getElementById('callCard').classList.add('is-open');
+      document.getElementById('putCard').classList.add('is-open');
+      document.getElementById('callStatusBadge').innerText = `SHORT ${sz} BTC (OPEN)`;
+      document.getElementById('putStatusBadge').innerText = `SHORT ${sz} BTC (OPEN)`;
+    }
+
+    function resetTradeCard() {
+      activeTrade = null;
+      document.getElementById('mainTerminalCard').classList.remove('active-trade');
+      document.getElementById('stateText').innerText = 'IDLE';
+      document.getElementById('stateText').style.color = '#38bdf8';
+
+      document.getElementById('openQtyBadge').innerHTML = 'Open: <strong>0.00 BTC</strong>';
+      document.getElementById('btnScaleIn').style.display = 'none';
+      document.getElementById('btnLevel1').disabled = false;
+      document.getElementById('btnLevel2').disabled = false;
+      document.getElementById('btnCloseAll').disabled = true;
+
+      document.getElementById('callCard').classList.remove('is-open');
+      document.getElementById('putCard').classList.remove('is-open');
+      document.getElementById('callStatusBadge').innerText = 'READY TO SELL';
+      document.getElementById('putStatusBadge').innerText = 'READY TO SELL';
+
+      document.getElementById('pnlHeroText').innerText = '+0.00% ($0.00)';
+      document.getElementById('pnlHeroText').className = 'pnl-value pnl-neutral';
+      document.getElementById('riskDistanceText').innerText = 'Awaiting Execution';
+    }
+
+    function updatePnlDisplay(pnlPct, pnlUsd) {
+      const el = document.getElementById('pnlHeroText');
+      const sign = pnlPct >= 0 ? '+' : '';
+      el.innerText = `${sign}${pnlPct.toFixed(2)}% (${sign}$${pnlUsd.toFixed(2)})`;
+      el.className = `pnl-value ${pnlPct >= 0 ? 'pnl-pos' : 'pnl-neg'}`;
+
+      if (activeTrade && activeTrade.combined_entry_premium) {
+        const buyback = activeTrade.current_buyback_premium || activeTrade.combined_entry_premium;
+        const distSl = ((activeTrade.stop_loss_target - buyback) / activeTrade.combined_entry_premium) * 100.0;
+        const distTp = ((buyback - activeTrade.take_profit_target) / activeTrade.combined_entry_premium) * 100.0;
+        document.getElementById('riskDistanceText').innerText = `SL: ${distSl >= 0 ? '+' : ''}${distSl.toFixed(2)}% | TP: ${distTp >= 0 ? '+' : ''}${distTp.toFixed(2)}%`;
+      }
+    }
+
+    // Handle incoming WebSocket telemetry event
+    function handleLiveEvent(data) {
+      if (data.type === 'INITIALIZATION') {
+        document.getElementById('stateText').innerText = 'STARTING...';
+      } else if (data.type === 'STRADDLE_POSITION_ESTABLISHED') {
+        refreshSession();
+      } else if (data.type === 'VALUATION_UPDATE' || data.type === 'PNL_HEARTBEAT') {
+        if (data.call_ask) document.getElementById('callAskText').innerText = `$${data.call_ask.toFixed(2)}`;
+        if (data.put_ask) document.getElementById('putAskText').innerText = `$${data.put_ask.toFixed(2)}`;
+        if (data.call_bid) document.getElementById('callBidText').innerText = `$${data.call_bid.toFixed(2)}`;
+        if (data.put_bid) document.getElementById('putBidText').innerText = `$${data.put_bid.toFixed(2)}`;
+        if (data.current_buyback_premium) {
+          document.getElementById('buybackCostText').innerText = `$${data.current_buyback_premium.toFixed(2)}`;
+        }
+        if (data.pnl_pct !== undefined) {
+          updatePnlDisplay(data.pnl_pct, data.pnl_usd || 0);
+        }
+        if (data.type === 'PNL_HEARTBEAT') {
+          appendLogRow({
+            time: new Date().toLocaleTimeString(),
+            category: 'PNL',
+            badge_type: data.pnl_pct >= 0 ? 'pnl-pos' : 'pnl-neg',
+            message: data.message,
+          });
+        }
+      } else if (data.type === 'EXIT_TRIGGERED' || data.type === 'STRADDLE_CLOSED') {
+        refreshSession();
+        refreshAccount();
+      }
+    }
+
+    // Straddle controls
+    async function startStraddle(level) {
+      try {
+        const res = await fetch('/api/straddle/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ level: level, trade_size: selectedTradeSize, simulated: false }),
+        });
+        const d = await res.json();
+        if (!res.ok) throw new Error(d.detail || 'Failed to start');
+        refreshSession();
+      } catch (err) {
+        alert(err.message);
+      }
+    }
+
+    async function scaleIn() {
+      try {
+        const res = await fetch('/api/straddle/scale-in', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ trade_size: selectedTradeSize }),
+        });
+        const d = await res.json();
+        if (!res.ok) throw new Error(d.detail || 'Scale-in failed');
+        refreshSession();
+      } catch (err) {
+        alert(err.message);
+      }
+    }
+
+    async function stopStraddle() {
+      try {
+        const res = await fetch('/api/straddle/stop', { method: 'POST' });
+        await res.json();
+        refreshSession();
+      } catch (err) {
+        alert('Failed to stop straddle: ' + err.message);
+      }
+    }
+
+    async function triggerShock(type) {
+      try {
+        const res = await fetch('/api/straddle/shock', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ shock_type: type }),
+        });
+        const d = await res.json();
+        if (!res.ok) throw new Error(d.detail || 'Shock failed');
+        refreshSession();
+      } catch (err) {
+        alert(err.message);
+      }
+    }
+
+    async function clearLogs() {
+      await fetch('/api/logs/clear', { method: 'POST' });
+      document.getElementById('tabLogs').innerHTML = '';
+    }
+
+    function switchTab(tab) {
+      const tabBtns = document.querySelectorAll('.tab-btn');
+      tabBtns.forEach(b => b.classList.remove('active'));
+      if (tab === 'logs') {
+        tabBtns[0].classList.add('active');
+        document.getElementById('tabLogs').style.display = 'flex';
+        document.getElementById('tabHistory').style.display = 'none';
+      } else {
+        tabBtns[1].classList.add('active');
+        document.getElementById('tabLogs').style.display = 'none';
+        document.getElementById('tabHistory').style.display = 'block';
+      }
+    }
+
+    // Walkthrough modal
+    async function openModal() {
+      document.getElementById('qaModal').style.display = 'flex';
+      try {
+        const res = await fetch('/api/walkthrough');
+        const data = await res.json();
+        const body = document.getElementById('qaBody');
+        body.innerHTML = '';
+        data.questions.forEach(q => {
+          const div = document.createElement('div');
+          div.className = 'qa-card';
+          div.innerHTML = `
+            <div class="qa-q">Q${q.id}: ${q.question}</div>
+            <div class="qa-a">${q.details}</div>
+          `;
+          body.appendChild(div);
+        });
+      } catch (err) {}
+    }
+    function closeModal() {
+      document.getElementById('qaModal').style.display = 'none';
+    }
+
+    // Initial setup & 5-second interval loop
+    window.addEventListener('load', () => {
+      initWebSocket();
+      refreshSession();
+      refreshMarket();
+      refreshAccount();
+
+      // Refresh every 5 seconds as requested
+      setInterval(() => {
+        refreshMarket();
+        refreshAccount();
+        refreshSession();
+      }, 5000);
+    });
+  </script>
+</body>
+</html>
