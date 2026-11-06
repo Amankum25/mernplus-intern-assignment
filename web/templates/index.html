@@ -259,10 +259,11 @@
       border-color: var(--primary);
     }
 
-    .strike-chip.is-atm {
-      border: 2px solid var(--primary);
-      background: var(--primary-light);
-      color: var(--primary);
+    .strike-chip.is-selected {
+      border: 2px solid var(--primary) !important;
+      background: var(--primary-light) !important;
+      color: var(--primary) !important;
+      box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.15);
     }
 
     .strike-chip-distance {
@@ -272,21 +273,23 @@
       margin-top: 0.1rem;
     }
 
-    .strike-chip.is-atm .strike-chip-distance {
-      color: var(--primary);
-      font-weight: 600;
+    .strike-chip.is-selected .strike-chip-distance {
+      color: var(--primary) !important;
+      font-weight: 700;
     }
 
     .atm-tag {
       position: absolute;
-      top: -7px;
+      top: -8px;
       background: var(--primary);
       color: #FFFFFF;
-      font-size: 0.55rem;
+      font-size: 0.58rem;
       font-weight: 700;
-      padding: 1px 4px;
+      padding: 1px 5px;
       border-radius: 3px;
       text-transform: uppercase;
+      pointer-events: none;
+      z-index: 2;
     }
 
     /* Option Pair Side by Side */
@@ -730,7 +733,12 @@
           <span style="font-size: 0.72rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">
             Available Strike Selector (Click to Select):
           </span>
-          <span style="font-size: 0.68rem; color: var(--text-muted);">Auto-Selection Matches ATM Closest to BTC Spot</span>
+          <div style="display: flex; align-items: center; gap: 0.45rem;">
+            <button class="btn-header" onclick="resetToAutoAtm()" style="font-size: 0.68rem; padding: 0.15rem 0.5rem; background: var(--primary-light); color: var(--primary); border-color: #C7D2FE;">
+              ⚡ Auto ATM Strike
+            </button>
+            <span style="font-size: 0.68rem; color: var(--text-muted);" id="strikeSelectionModeLabel">Auto ATM Active</span>
+          </div>
         </div>
         <div class="strike-chips" id="strikeChipsContainer">
           <div style="font-size: 0.76rem; color: var(--text-muted);">Discovering option chain...</div>
@@ -1102,6 +1110,7 @@
     let pendingLevelToExecute = 2;
     let ws = null;
     let localLogs = [];
+    let hasActivePositions = false;
 
     function fmtUSD(val) {
       if (val === undefined || val === null || isNaN(val)) return "$0.00";
@@ -1202,13 +1211,30 @@
       const container = document.getElementById("strikeChipsContainer");
       if (!container || !data.strike_matrix) return;
 
+      const atmStrike = data.atm_strike;
+      const activeStrike = (selectedStrike !== null && selectedStrike !== undefined) ? selectedStrike : atmStrike;
+
+      const modeLabel = document.getElementById("strikeSelectionModeLabel");
+      if (modeLabel) {
+        if (selectedStrike === null || selectedStrike === atmStrike) {
+          modeLabel.innerText = "Auto ATM Active";
+          modeLabel.style.color = "var(--primary)";
+        } else {
+          modeLabel.innerText = `Manual: $${selectedStrike.toLocaleString()}`;
+          modeLabel.style.color = "var(--warning)";
+        }
+      }
+
       container.innerHTML = data.strike_matrix.map(item => {
         const isAtm = item.is_atm;
-        const isSel = item.is_selected || (selectedStrike ? item.strike === selectedStrike : isAtm);
+        const isSel = (item.strike === activeStrike);
         const diffStr = item.diff > 0 ? `+${fmtUSD(item.diff)}` : fmtUSD(item.diff);
         
+        let chipClass = "strike-chip";
+        if (isSel) chipClass += " is-selected";
+
         return `
-          <div class="strike-chip ${isAtm ? 'is-atm' : ''}" style="${isSel && !isAtm ? 'border-color: var(--primary); background: #F1F5F9;' : ''}" onclick="selectSpecificStrike(${item.strike})">
+          <div class="${chipClass}" onclick="selectSpecificStrike(${item.strike})" title="Select Strike $${item.strike.toLocaleString()}">
             ${isAtm ? '<span class="atm-tag">ATM</span>' : ''}
             <div>${fmtStrike(item.strike)}</div>
             <div class="strike-chip-distance">${diffStr}</div>
@@ -1255,8 +1281,13 @@
     }
 
     function selectSpecificStrike(strike) {
-      selectedStrike = strike;
+      selectedStrike = parseFloat(strike);
       fetchMarketData(selectedExpiryMs, selectedStrike);
+    }
+
+    function resetToAutoAtm() {
+      selectedStrike = null;
+      fetchMarketData(selectedExpiryMs, null);
     }
 
     function onExpiryChanged() {
@@ -1277,6 +1308,7 @@
       const put = currentMarket.put_contract;
       const estEntry = (call.bid + put.bid) > 0 ? (call.bid + put.bid) : (call.ask + put.ask);
 
+      document.getElementById("modalTitle").innerText = hasActivePositions ? "Add Straddle Position (Scale-in)" : "Confirm Strategy Execution";
       document.getElementById("modalLevelVal").innerText = level === 1 ? "Level 1 (Naked Straddle)" : "Level 2 (1% SL / 2% TP)";
       document.getElementById("modalExpiryVal").innerText = currentMarket.expiry_str;
       document.getElementById("modalStrikeVal").innerText = fmtStrike(call.strike);
@@ -1389,11 +1421,14 @@
         const execL1 = document.getElementById("btnExecLevel1");
         const execL2 = document.getElementById("btnExecLevel2");
         const hasPositions = session.live_positions && session.live_positions.length > 0;
+        hasActivePositions = Boolean((isRunning && trade) || hasPositions);
 
         if ((isRunning && trade) || hasPositions) {
           closeBtn.disabled = false;
-          execL1.disabled = true;
-          execL2.disabled = true;
+          execL1.disabled = false;
+          execL2.disabled = false;
+          execL1.innerText = "Add Position: Level 1 (Naked)";
+          execL2.innerText = "Add Position: Level 2 (1% SL / 2% TP)";
 
           let combinedEntry = trade ? trade.combined_entry_premium : 0.0;
           let currentBuyback = trade ? trade.current_buyback_premium : 0.0;
@@ -1429,6 +1464,8 @@
           closeBtn.disabled = true;
           execL1.disabled = false;
           execL2.disabled = false;
+          execL1.innerText = "Execute Level 1 (Naked Straddle)";
+          execL2.innerText = "Execute Level 2 (1% SL / 2% TP)";
           if (stateName === "IDLE" || stateName === "CLOSED") {
             document.getElementById("combinedEntryVal").innerText = "$0.00";
             document.getElementById("currentBuybackVal").innerText = "$0.00";

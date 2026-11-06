@@ -375,23 +375,15 @@ class StraddleExecutionManager:
         target_strike: Optional[float] = None,
     ) -> Dict[str, Any]:
         """
-        Starts the BTC ATM Short Straddle strategy.
-
-        Parameters
-        ----------
-        level : int, default 2
-            1: Level 1 (Naked Straddle).
-            2: Level 2 (Automated Risk Management with 1% SL / 2% TP).
-        trade_size : float, default 0.01
-            Order size per leg (min 0.01 BTC).
-        simulated : bool, default False
-            If True, runs simulated execution with live market quotes.
-        target_expiry_ms : int, optional
-            Target delivery timestamp in ms.
-        target_strike : float, optional
-            Target strike if overriding ATM.
+        Starts the BTC ATM Short Straddle strategy or adds to an active straddle position.
         """
-        # Cleanly reset and stop any prior loop before starting
+        # If a straddle is already actively running on this pair, scale in (take multiple positions)
+        if self.is_running and self.active_strategy and self.active_strategy.strategy_state == StrategyState.ACTIVE_POSITION:
+            if self.current_pair and (target_strike is None or target_strike == self.current_pair.atm_strike):
+                logger.info(f"Scaling in / Adding multiple position (+{trade_size} BTC) to existing straddle...")
+                return self.scale_in_straddle(additional_size=trade_size)
+
+        # Cleanly reset and stop any prior loop before starting new straddle
         if self.is_running:
             self._stop_event.set()
             if self._stream_thread and self._stream_thread.is_alive():
@@ -489,6 +481,28 @@ class StraddleExecutionManager:
                 self.bybit_client.place_order(symbol=put_symbol, side="Sell", qty=str(additional_size))
             except Exception as e:
                 logger.error(f"Error placing scale-in order: {e}")
+
+        # Record scale-in orders in audit history
+        call_order_id = f"CALL-SCALE-{int(time.time() * 1000)}"
+        put_order_id = f"PUT-SCALE-{int(time.time() * 1000)}"
+        state_persistence.add_order(
+            order_id=call_order_id,
+            contract=call_symbol,
+            side="SELL",
+            qty=additional_size,
+            filled_qty=additional_size,
+            avg_price=call_px,
+            status="FILLED",
+        )
+        state_persistence.add_order(
+            order_id=put_order_id,
+            contract=put_symbol,
+            side="SELL",
+            qty=additional_size,
+            filled_qty=additional_size,
+            avg_price=put_px,
+            status="FILLED",
+        )
 
         old_size = self.current_trade_size
         new_size = round(old_size + additional_size, 4)
