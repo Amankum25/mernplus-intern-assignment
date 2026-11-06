@@ -68,14 +68,10 @@ python -m pytest -v tests
 
 ---
 
-## Push to GitHub
+## Repository
 
-To push this repository to your public GitHub repo (`mernplus-intern-assignment`):
-```powershell
-git remote add origin https://github.com/<your-username>/mernplus-intern-assignment.git
-git branch -M main
-git push -u origin main
-```
+- **GitHub Repository**: [https://github.com/Amankum25/mernplus-intern-assignment](https://github.com/Amankum25/mernplus-intern-assignment)
+- **Clone URL**: `git clone https://github.com/Amankum25/mernplus-intern-assignment.git`
 
 See the full written walkthrough and presentation guide in [WALKTHROUGH.md](WALKTHROUGH.md) or open the **"Interview Walkthrough"** tab in the web dashboard!
 
