@@ -47,6 +47,7 @@ class BybitStrikeSelector:
 
     def __init__(self, base_url: str = "https://api.bybit.com"):
         self.base_url = base_url.rstrip("/")
+        self.session = requests.Session()
         self._cached_contracts: List[OptionContractInfo] = []
         self._cached_contracts_ts: float = 0.0
         self._cached_price: float = 0.0
@@ -58,13 +59,13 @@ class BybitStrikeSelector:
         Uses BTCUSDT linear ticker last/index price or option index price.
         """
         now = time.time()
-        if self._cached_price > 0 and (now - self._cached_price_ts) < 2.0:
+        if self._cached_price > 0 and (now - self._cached_price_ts) < 2.5:
             return self._cached_price
 
         try:
             # Query linear perpetual for live BTC reference price
             url = f"{self.base_url}/v5/market/tickers?category=linear&symbol=BTCUSDT"
-            res = requests.get(url, timeout=5).json()
+            res = self.session.get(url, timeout=3).json()
             if res.get("retCode") == 0 and res.get("result", {}).get("list"):
                 ticker = res["result"]["list"][0]
                 price = float(ticker.get("lastPrice") or ticker.get("indexPrice") or ticker.get("markPrice"))
@@ -78,7 +79,7 @@ class BybitStrikeSelector:
         # Fallback to option tickers
         try:
             url = f"{self.base_url}/v5/market/tickers?category=option&baseCoin=BTC"
-            res = requests.get(url, timeout=5).json()
+            res = self.session.get(url, timeout=3).json()
             if res.get("retCode") == 0 and res.get("result", {}).get("list"):
                 for t in res["result"]["list"]:
                     ref = float(t.get("underlyingPrice") or t.get("indexPrice") or 0)
@@ -98,12 +99,12 @@ class BybitStrikeSelector:
         Uses in-memory caching to prevent API rate limits and optimize response times.
         """
         now = time.time()
-        if self._cached_contracts and (now - self._cached_contracts_ts) < 30.0:
+        if self._cached_contracts and (now - self._cached_contracts_ts) < 45.0:
             return self._cached_contracts
 
         url = f"{self.base_url}/v5/market/instruments-info?category=option&baseCoin=BTC&limit=1000"
         try:
-            res = requests.get(url, timeout=5).json()
+            res = self.session.get(url, timeout=4).json()
             if res.get("retCode") != 0 or not res.get("result", {}).get("list"):
                 if self._cached_contracts:
                     return self._cached_contracts

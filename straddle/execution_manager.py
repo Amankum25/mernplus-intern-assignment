@@ -89,6 +89,8 @@ class StraddleExecutionManager:
             if (self.api_key and self.api_secret)
             else None
         )
+        self._http_session = requests.Session()
+        self._ticker_cache: Dict[str, Any] = {}
         self.active_strategy: Optional[BTCShortStraddleStrategy] = None
         self.node: Optional[TradingNode] = None
         self.current_pair: Optional[StraddlePair] = None
@@ -1019,7 +1021,8 @@ class StraddleExecutionManager:
 
         url = f"{self.base_url}/v5/market/tickers?category=option&symbol={symbol}"
         try:
-            res = requests.get(url, timeout=5).json()
+            session = getattr(self, "_http_session", requests)
+            res = session.get(url, timeout=3).json()
             if res.get("retCode") == 0 and res.get("result", {}).get("list"):
                 item = res["result"]["list"][0]
                 data = {

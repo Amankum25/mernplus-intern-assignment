@@ -1139,16 +1139,20 @@
       setInterval(syncAllState, 4000);
     }
 
+    let isSyncing = false;
     async function syncAllState() {
+      if (isSyncing) return;
+      isSyncing = true;
       try {
         await Promise.all([
           fetchMarketData(selectedExpiryMs, selectedStrike),
           fetchSessionState(),
           fetchOrders(),
-          fetchPositions(),
         ]);
       } catch (e) {
         console.error("Sync error:", e);
+      } finally {
+        isSyncing = false;
       }
     }
 
@@ -1176,7 +1180,10 @@
       } catch (err) {}
     }
 
+    let isFetchingMarket = false;
     async function fetchMarketData(expiryMs = null, strike = null) {
+      if (isFetchingMarket) return;
+      isFetchingMarket = true;
       try {
         let url = "/api/market";
         const params = [];
@@ -1204,7 +1211,9 @@
 
         renderStrikeChips(data);
         renderOptionLegs(data);
-      } catch (err) {}
+      } catch (err) {} finally {
+        isFetchingMarket = false;
+      }
     }
 
     function renderStrikeChips(data) {
@@ -1234,13 +1243,40 @@
         if (isSel) chipClass += " is-selected";
 
         return `
-          <div class="${chipClass}" onclick="selectSpecificStrike(${item.strike})" title="Select Strike $${item.strike.toLocaleString()}">
+          <div class="${chipClass}" data-strike="${item.strike}" onclick="selectSpecificStrike(${item.strike})" title="Select Strike $${item.strike.toLocaleString()}">
             ${isAtm ? '<span class="atm-tag">ATM</span>' : ''}
             <div>${fmtStrike(item.strike)}</div>
             <div class="strike-chip-distance">${diffStr}</div>
           </div>
         `;
       }).join("");
+    }
+
+    function updateStrikeChipsSelection() {
+      const container = document.getElementById("strikeChipsContainer");
+      if (!container) return;
+      const atmStrike = currentMarket ? currentMarket.atm_strike : null;
+      const activeStrike = (selectedStrike !== null && selectedStrike !== undefined) ? selectedStrike : atmStrike;
+
+      const modeLabel = document.getElementById("strikeSelectionModeLabel");
+      if (modeLabel) {
+        if (selectedStrike === null || selectedStrike === atmStrike) {
+          modeLabel.innerText = "Auto ATM Active";
+          modeLabel.style.color = "var(--primary)";
+        } else {
+          modeLabel.innerText = `Manual: $${selectedStrike.toLocaleString()}`;
+          modeLabel.style.color = "var(--warning)";
+        }
+      }
+
+      container.querySelectorAll(".strike-chip").forEach(chip => {
+        const s = parseFloat(chip.dataset.strike);
+        if (s === activeStrike) {
+          chip.classList.add("is-selected");
+        } else {
+          chip.classList.remove("is-selected");
+        }
+      });
     }
 
     function renderOptionLegs(data) {
@@ -1282,11 +1318,13 @@
 
     function selectSpecificStrike(strike) {
       selectedStrike = parseFloat(strike);
+      updateStrikeChipsSelection();
       fetchMarketData(selectedExpiryMs, selectedStrike);
     }
 
     function resetToAutoAtm() {
       selectedStrike = null;
+      updateStrikeChipsSelection();
       fetchMarketData(selectedExpiryMs, null);
     }
 
@@ -1475,6 +1513,11 @@
           }
         }
 
+        // Render Positions directly from session if present
+        if (session.live_positions) {
+          renderPositions(session.live_positions);
+        }
+
         // Render Logs
         if (session.logs) {
           renderLogs(session.logs);
@@ -1518,50 +1561,54 @@
       } catch (err) {}
     }
 
+    function renderPositions(positions) {
+      const tbody = document.getElementById("positionsTableBody");
+      const countBadge = document.getElementById("positionsCountVal");
+      if (countBadge) countBadge.innerText = positions ? positions.length : 0;
+      if (!tbody) return;
+
+      if (!positions || positions.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--text-muted); padding: 1rem;">No open positions confirmed on Bybit.</td></tr>`;
+        return;
+      }
+
+      const hasCall = positions.some(p => p.symbol && p.symbol.includes("-C"));
+      const hasPut = positions.some(p => p.symbol && p.symbol.includes("-P"));
+      const isPartial = positions.length === 1 || (hasCall !== hasPut);
+
+      let warningRow = "";
+      if (isPartial) {
+        warningRow = `
+          <tr>
+            <td colspan="6" style="background: var(--warning-bg); color: var(--warning); font-weight: 600; text-align: center; padding: 0.35rem;">
+              ⚠️ PARTIAL STRADDLE — UNHEDGED EXPOSURE DETECTED
+            </td>
+          </tr>
+        `;
+      }
+
+      tbody.innerHTML = warningRow + positions.map(p => {
+        const pnl = parseFloat(p.unrealisedPnl || 0.0);
+        const pnlColor = pnl >= 0 ? "var(--success)" : "var(--danger)";
+        return `
+          <tr>
+            <td class="font-mono" style="font-weight: 600;">${p.symbol}</td>
+            <td><span class="badge badge-danger">${p.side || "Sell"}</span></td>
+            <td class="font-mono">${p.size} BTC</td>
+            <td class="font-mono">${fmtUSD(p.avgPrice)}</td>
+            <td class="font-mono">${fmtUSD(p.markPrice)}</td>
+            <td class="font-mono" style="color: ${pnlColor}; font-weight: 600;">${pnl >= 0 ? '+' : ''}${fmtUSD(pnl)}</td>
+          </tr>
+        `;
+      }).join("");
+    }
+
     async function fetchPositions() {
       try {
         const res = await fetch("/api/positions");
         if (!res.ok) return;
         const positions = await res.json();
-        const tbody = document.getElementById("positionsTableBody");
-        const countBadge = document.getElementById("positionsCountVal");
-        if (countBadge) countBadge.innerText = positions ? positions.length : 0;
-        if (!tbody) return;
-
-        if (!positions || positions.length === 0) {
-          tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--text-muted); padding: 1rem;">No open positions confirmed on Bybit.</td></tr>`;
-          return;
-        }
-
-        const hasCall = positions.some(p => p.symbol && p.symbol.includes("-C"));
-        const hasPut = positions.some(p => p.symbol && p.symbol.includes("-P"));
-        const isPartial = positions.length === 1 || (hasCall !== hasPut);
-
-        let warningRow = "";
-        if (isPartial) {
-          warningRow = `
-            <tr>
-              <td colspan="6" style="background: var(--warning-bg); color: var(--warning); font-weight: 600; text-align: center; padding: 0.35rem;">
-                ⚠️ PARTIAL STRADDLE — UNHEDGED EXPOSURE DETECTED
-              </td>
-            </tr>
-          `;
-        }
-
-        tbody.innerHTML = warningRow + positions.map(p => {
-          const pnl = parseFloat(p.unrealisedPnl || 0.0);
-          const pnlColor = pnl >= 0 ? "var(--success)" : "var(--danger)";
-          return `
-            <tr>
-              <td class="font-mono" style="font-weight: 600;">${p.symbol}</td>
-              <td><span class="badge badge-danger">${p.side || "Sell"}</span></td>
-              <td class="font-mono">${p.size} BTC</td>
-              <td class="font-mono">${fmtUSD(p.avgPrice)}</td>
-              <td class="font-mono">${fmtUSD(p.markPrice)}</td>
-              <td class="font-mono" style="color: ${pnlColor}; font-weight: 600;">${pnl >= 0 ? '+' : ''}${fmtUSD(pnl)}</td>
-            </tr>
-          `;
-        }).join("");
+        renderPositions(positions);
       } catch (err) {}
     }
 

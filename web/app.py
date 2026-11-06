@@ -141,7 +141,7 @@ async def test_connection():
 
 
 @app.get("/api/session")
-async def get_session():
+def get_session():
     """Returns persistent session state: active trade, logs history, trade history, and stats."""
     state = state_persistence.get_full_state()
     strategy_state = "IDLE"
@@ -181,7 +181,7 @@ async def get_session():
 
 
 @app.post("/api/logs/clear")
-async def clear_logs():
+def clear_logs():
     """Clears persistent log history."""
     with state_persistence.lock:
         state_persistence.state["logs"] = []
@@ -190,7 +190,7 @@ async def clear_logs():
 
 
 @app.get("/api/account")
-async def get_account():
+def get_account():
     """Returns Bybit Demo/Testnet account balance and margin status."""
     if manager.bybit_client:
         try:
@@ -213,7 +213,7 @@ async def get_account():
 
 
 @app.get("/api/market")
-async def get_market(expiry_ms: Optional[int] = None, strike: Optional[float] = None):
+def get_market(expiry_ms: Optional[int] = None, strike: Optional[float] = None):
     """Returns live BTC reference price, expiration dates, and ATM strike chain."""
     try:
         overview = manager.get_market_overview(target_expiry_ms=expiry_ms, target_strike=strike)
@@ -223,7 +223,7 @@ async def get_market(expiry_ms: Optional[int] = None, strike: Optional[float] = 
 
 
 @app.post("/api/config")
-async def update_config(req: ConfigRequest):
+def update_config(req: ConfigRequest):
     """Updates Bybit API keys and switches environment (DEMO / TESTNET)."""
     global manager
     was_running = manager.is_running
@@ -240,7 +240,7 @@ async def update_config(req: ConfigRequest):
 
 
 @app.post("/api/straddle/start")
-async def start_straddle(req: StartStraddleRequest):
+def start_straddle(req: StartStraddleRequest):
     """Starts the BTC ATM Short Straddle strategy."""
     try:
         res = manager.start_straddle(
@@ -256,7 +256,7 @@ async def start_straddle(req: StartStraddleRequest):
 
 
 @app.post("/api/straddle/scale-in")
-async def scale_in_straddle(req: StartStraddleRequest):
+def scale_in_straddle(req: StartStraddleRequest):
     """Adds to the active straddle position (multi-lot scale in)."""
     try:
         return manager.scale_in_straddle(additional_size=req.trade_size)
@@ -265,20 +265,20 @@ async def scale_in_straddle(req: StartStraddleRequest):
 
 
 @app.post("/api/straddle/stop")
-async def stop_straddle():
+def stop_straddle():
     """Stops the strategy and closes open straddle positions."""
     return manager.stop_straddle()
 
 
 @app.get("/api/orders")
-async def get_orders():
+def get_orders():
     """Returns order history from persistent storage."""
     state = state_persistence.get_full_state()
     return state.get("orders", [])
 
 
 @app.get("/api/positions")
-async def get_positions():
+def get_positions():
     """Returns active Bybit option positions directly from exchange or active trade."""
     if manager.bybit_client and not manager.is_simulated:
         try:
@@ -319,7 +319,7 @@ async def get_positions():
 
 
 @app.post("/api/straddle/shock")
-async def simulate_shock(req: ShockRequest):
+def simulate_shock(req: ShockRequest):
     """Demonstrates automated Stop-Loss (+1%) or Take-Profit (-2%) by simulating a price move."""
     try:
         return manager.simulate_price_shock(req.shock_type)
