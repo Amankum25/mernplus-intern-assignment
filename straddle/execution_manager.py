@@ -49,7 +49,7 @@ from straddle.bybit_client import BybitV5Client
 from straddle.config import BTCShortStraddleConfig
 from straddle.persistence import state_persistence
 from straddle.strategy import BTCShortStraddleStrategy, StrategyState
-from straddle.strike_selector import BybitStrikeSelector, StraddlePair
+from straddle.strike_selector import BybitStrikeSelector, StraddlePair, OptionContractInfo
 
 
 logger = logging.getLogger("StraddleExecutionManager")
@@ -120,6 +120,146 @@ class StraddleExecutionManager:
         # Polling/streaming thread for simulated or hybrid mode
         self._stream_thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
+
+        # Reconcile any existing open Bybit positions on startup
+        try:
+            self.reconcile_positions()
+        except Exception:
+            pass
+
+    def reconcile_positions(self) -> bool:
+        """
+        Reconciles open option positions directly from Bybit Testnet / Demo.
+        If active Call and/or Put positions are found on the exchange, reconstructs
+        the StraddlePair and active strategy state, enabling real-time valuation and automated exits.
+        """
+        if not self.bybit_client or self.is_simulated:
+            return False
+
+        try:
+            res = self.bybit_client.get_open_positions("BTC")
+            positions = res.get("result", {}).get("list", [])
+            if not positions:
+                return False
+
+            call_pos = next((p for p in positions if "-C" in p.get("symbol", "") and float(p.get("size", 0)) > 0), None)
+            put_pos = next((p for p in positions if "-P" in p.get("symbol", "") and float(p.get("size", 0)) > 0), None)
+
+            if not call_pos and not put_pos:
+                return False
+
+            call_sym = call_pos["symbol"] if call_pos else ""
+            put_sym = put_pos["symbol"] if put_pos else ""
+            call_entry = float(call_pos.get("avgPrice", 0.0)) if call_pos else 0.0
+            put_entry = float(put_pos.get("avgPrice", 0.0)) if put_pos else 0.0
+            c_size = float(call_pos.get("size", 0.01)) if call_pos else 0.01
+            p_size = float(put_pos.get("size", 0.01)) if put_pos else 0.01
+            trade_size = max(c_size, p_size)
+
+            ref_sym = call_sym or put_sym
+            parts = ref_sym.split("-")
+            strike = 76000.0
+            if len(parts) >= 3:
+                try:
+                    strike = float(parts[2])
+                except ValueError:
+                    pass
+
+            expiry_str = f"{parts[1]} 08:00 UTC" if len(parts) >= 2 else "2026-11-07 08:00 UTC"
+            combined_entry = (call_entry + put_entry) if (call_entry > 0 and put_entry > 0) else (call_entry or put_entry) * 2
+
+            call_contract = OptionContractInfo(
+                symbol=call_sym,
+                instrument_id=f"{call_sym}-OPTION.BYBIT" if call_sym else "BTC-CALL-OPTION.BYBIT",
+                strike=strike,
+                option_type="CALL",
+                delivery_time_ms=0,
+                expiry_str=expiry_str,
+                min_order_qty=0.01,
+                price_tick_size=5.0,
+            )
+            put_contract = OptionContractInfo(
+                symbol=put_sym,
+                instrument_id=f"{put_sym}-OPTION.BYBIT" if put_sym else "BTC-PUT-OPTION.BYBIT",
+                strike=strike,
+                option_type="PUT",
+                delivery_time_ms=0,
+                expiry_str=expiry_str,
+                min_order_qty=0.01,
+                price_tick_size=5.0,
+            )
+
+            pair = StraddlePair(
+                btc_price=self.selector.get_btc_reference_price(),
+                expiry_ms=0,
+                expiry_str=expiry_str,
+                atm_strike=strike,
+                call_contract=call_contract,
+                put_contract=put_contract,
+                available_strikes=[strike],
+                available_expiries=[],
+                strike_matrix=[],
+                selected_strike=strike,
+            )
+            self.current_pair = pair
+            self.current_trade_size = trade_size
+
+            call_id = InstrumentId.from_str(pair.call_contract.instrument_id)
+            put_id = InstrumentId.from_str(pair.put_contract.instrument_id)
+            config = BTCShortStraddleConfig(
+                call_instrument_id=call_id,
+                put_instrument_id=put_id,
+                trade_size=Decimal(str(trade_size)),
+                level=2,
+                stop_loss_pct=Decimal("0.01"),
+                take_profit_pct=Decimal("0.02"),
+                simulated_execution=False,
+            )
+            self.active_strategy = BTCShortStraddleStrategy(config=config)
+            self.active_strategy.set_event_listener(self._broadcast)
+            self.active_strategy.call_entry_filled = bool(call_pos)
+            self.active_strategy.put_entry_filled = bool(put_pos)
+            self.active_strategy.call_entry_price = call_entry
+            self.active_strategy.put_entry_price = put_entry
+            self.active_strategy.combined_entry_premium = combined_entry
+            self.active_strategy.stop_loss_target_premium = combined_entry * 1.01
+            self.active_strategy.take_profit_target_premium = combined_entry * 0.98
+            self.active_strategy.strategy_state = StrategyState.ACTIVE_POSITION
+            self.is_running = True
+
+            state_persistence.set_active_trade({
+                "level": 2,
+                "simulated": False,
+                "trade_size": trade_size,
+                "atm_strike": strike,
+                "expiry_str": expiry_str,
+                "call_symbol": call_sym,
+                "put_symbol": put_sym,
+                "call_entry_price": call_entry,
+                "put_entry_price": put_entry,
+                "combined_entry_premium": combined_entry,
+                "stop_loss_target": combined_entry * 1.01,
+                "take_profit_target": combined_entry * 0.98,
+                "current_buyback_premium": combined_entry,
+                "pnl_pct": 0.0,
+                "pnl_usd": 0.0,
+            })
+
+            # Start market monitoring loop thread if not already running
+            if not self._stream_thread or not self._stream_thread.is_alive():
+                self._stop_event.clear()
+                self._stream_thread = threading.Thread(
+                    target=self._run_market_loop,
+                    args=(pair, 2, trade_size, False),
+                    daemon=True,
+                )
+                self._stream_thread.start()
+
+            logger.info(f"Reconciled active Bybit straddle: {call_sym} & {put_sym} @ ${combined_entry:,.2f}")
+            return True
+        except Exception as e:
+            logger.error(f"Error during position reconciliation: {e}")
+            return False
 
     def register_listener(self, callback: Callable[[Dict[str, Any]], None]) -> None:
         """Register a callback for real-time WebSocket/dashboard updates."""
@@ -923,22 +1063,28 @@ class StraddleExecutionManager:
         the automated 1% Stop-Loss or 2% Take-Profit execution.
         """
         if not self.active_strategy or self.active_strategy.strategy_state != StrategyState.ACTIVE_POSITION:
-            raise RuntimeError("No active straddle position to shock.")
+            self.reconcile_positions()
+
+        if not self.active_strategy or not self.current_pair:
+            raise RuntimeError("No active straddle position to shock. Please execute a straddle first.")
 
         entry = self.active_strategy.combined_entry_premium
+        if entry <= 0:
+            entry = 1450.0
+            self.active_strategy.combined_entry_premium = entry
+
         if shock_type == "STOP_LOSS":
             # Shock buyback premium up by +1.5% (> 1% Stop-Loss threshold)
             target = entry * 1.015
             self.active_strategy.current_call_ask = target / 2.0
             self.active_strategy.current_put_ask = target / 2.0
-            if self.current_pair:
-                self._execute_exit(
-                    reason="STOP_LOSS (+1% Threshold Triggered via Market Shock)",
-                    pair=self.current_pair,
-                    call_ask=target / 2.0,
-                    put_ask=target / 2.0,
-                    trade_size=self.current_trade_size,
-                )
+            self._execute_exit(
+                reason="STOP_LOSS (+1% Threshold Triggered via Market Shock)",
+                pair=self.current_pair,
+                call_ask=target / 2.0,
+                put_ask=target / 2.0,
+                trade_size=self.current_trade_size,
+            )
             return {"status": "STOP_LOSS_TRIGGERED", "buyback_premium": target}
 
         elif shock_type == "TAKE_PROFIT":
@@ -946,14 +1092,13 @@ class StraddleExecutionManager:
             target = entry * 0.975
             self.active_strategy.current_call_ask = target / 2.0
             self.active_strategy.current_put_ask = target / 2.0
-            if self.current_pair:
-                self._execute_exit(
-                    reason="TAKE_PROFIT (-2% Target Triggered via Market Shock)",
-                    pair=self.current_pair,
-                    call_ask=target / 2.0,
-                    put_ask=target / 2.0,
-                    trade_size=self.current_trade_size,
-                )
+            self._execute_exit(
+                reason="TAKE_PROFIT (-2% Target Triggered via Market Shock)",
+                pair=self.current_pair,
+                call_ask=target / 2.0,
+                put_ask=target / 2.0,
+                trade_size=self.current_trade_size,
+            )
             return {"status": "TAKE_PROFIT_TRIGGERED", "buyback_premium": target}
 
         return {"status": "UNKNOWN_SHOCK_TYPE"}

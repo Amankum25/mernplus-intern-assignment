@@ -159,6 +159,16 @@ async def get_session():
         except Exception:
             pass
 
+    # Auto-reconcile open Bybit positions into active strategy if not currently tracking
+    if live_positions and not manager.is_running:
+        try:
+            reconciled = manager.reconcile_positions()
+            if reconciled:
+                state = state_persistence.get_full_state()
+                strategy_state = "OPEN"
+        except Exception:
+            pass
+
     # Authoritative cleanup: if strategy is IDLE or CLOSED and no live positions exist, clear stale active_trade display
     if strategy_state in ["IDLE", "CLOSED"] and not live_positions:
         state["active_trade"] = None

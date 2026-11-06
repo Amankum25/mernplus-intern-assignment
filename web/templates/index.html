@@ -1388,29 +1388,40 @@
         const closeBtn = document.getElementById("btnCloseAllBtn");
         const execL1 = document.getElementById("btnExecLevel1");
         const execL2 = document.getElementById("btnExecLevel2");
+        const hasPositions = session.live_positions && session.live_positions.length > 0;
 
-        if (isRunning && trade) {
+        if ((isRunning && trade) || hasPositions) {
           closeBtn.disabled = false;
           execL1.disabled = true;
           execL2.disabled = true;
 
-          document.getElementById("strategyLevelBadge").innerText = `LEVEL ${trade.level || 2}`;
-          document.getElementById("combinedEntryVal").innerText = fmtUSD(trade.combined_entry_premium);
-          document.getElementById("currentBuybackVal").innerText = fmtUSD(trade.current_buyback_premium || trade.combined_entry_premium);
+          let combinedEntry = trade ? trade.combined_entry_premium : 0.0;
+          let currentBuyback = trade ? trade.current_buyback_premium : 0.0;
+          let pnlUsd = trade ? trade.pnl_usd : 0.0;
+          let pnlPct = trade ? trade.pnl_pct : 0.0;
+
+          if ((!combinedEntry || combinedEntry <= 0) && hasPositions) {
+            combinedEntry = session.live_positions.reduce((acc, p) => acc + parseFloat(p.avgPrice || 0), 0);
+            currentBuyback = session.live_positions.reduce((acc, p) => acc + parseFloat(p.markPrice || 0), 0);
+            pnlUsd = session.live_positions.reduce((acc, p) => acc + parseFloat(p.unrealisedPnl || 0), 0);
+            pnlPct = combinedEntry > 0 ? ((combinedEntry - currentBuyback) / combinedEntry) * 100 : 0.0;
+          }
+
+          document.getElementById("strategyLevelBadge").innerText = `LEVEL ${trade ? (trade.level || 2) : 2}`;
+          document.getElementById("combinedEntryVal").innerText = fmtUSD(combinedEntry);
+          document.getElementById("currentBuybackVal").innerText = fmtUSD(currentBuyback || combinedEntry);
 
           const pnlVal = document.getElementById("unrealizedPnlVal");
-          const pnlUsd = trade.pnl_usd || 0.0;
-          const pnlPct = trade.pnl_pct || 0.0;
           const sign = pnlUsd >= 0 ? "+" : "";
           pnlVal.innerText = `${sign}${fmtUSD(pnlUsd)} (${sign}${pnlPct.toFixed(2)}%)`;
           pnlVal.style.color = pnlUsd >= 0 ? "var(--success)" : "var(--danger)";
 
-          if (trade.level === 1) {
+          if (trade && trade.level === 1) {
             document.getElementById("riskTargetsVal").innerText = "AUTOMATIC SL/TP DISABLED";
             document.getElementById("riskTargetsVal").style.color = "var(--text-muted)";
           } else {
-            const sl = trade.stop_loss_target || (trade.combined_entry_premium * 1.01);
-            const tp = trade.take_profit_target || (trade.combined_entry_premium * 0.98);
+            const sl = (trade && trade.stop_loss_target) ? trade.stop_loss_target : (combinedEntry * 1.01);
+            const tp = (trade && trade.take_profit_target) ? trade.take_profit_target : (combinedEntry * 0.98);
             document.getElementById("riskTargetsVal").innerText = `SL: ${fmtUSD(sl)} | TP: ${fmtUSD(tp)}`;
             document.getElementById("riskTargetsVal").style.color = "var(--text-main)";
           }
