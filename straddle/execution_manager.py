@@ -567,6 +567,9 @@ class StraddleExecutionManager:
         call_entry_px: float = 0.0
         put_entry_px: float = 0.0
         entry_established = False
+        entry_ts: float = time.time()
+        sl_breach_count: int = 0
+        tp_breach_count: int = 0
         last_pnl_check_time: float = 0.0
 
         state_persistence.add_log(
@@ -855,28 +858,40 @@ class StraddleExecutionManager:
                         )
 
                     # Check Level 2 Automated Risk Management
+                    # To prevent premature whipsaws caused by single-tick testnet orderbook noise or micro-jitter,
+                    # we require a 20-second stabilization window after entry, plus 3 consecutive confirmation ticks.
+                    # Price shock demo triggers (simulate_price_shock) bypass this and execute immediately.
+                    time_in_trade = now_ts - entry_ts
                     if level == 2 and not self.active_strategy.exit_triggered:
                         # Stop-Loss: buyback premium increased by >= 1%
                         if combined_buyback >= self.active_strategy.stop_loss_target_premium:
-                            self._execute_exit(
-                                reason="STOP_LOSS (+1% Breach)",
-                                pair=pair,
-                                call_ask=call_ask,
-                                put_ask=put_ask,
-                                trade_size=trade_size,
-                            )
-                            break
+                            sl_breach_count += 1
+                            if time_in_trade >= 20.0 and sl_breach_count >= 3:
+                                self._execute_exit(
+                                    reason="STOP_LOSS (+1% Breach)",
+                                    pair=pair,
+                                    call_ask=call_ask,
+                                    put_ask=put_ask,
+                                    trade_size=trade_size,
+                                )
+                                break
+                        else:
+                            sl_breach_count = 0
 
                         # Take-Profit: buyback premium decreased by >= 2%
-                        elif combined_buyback <= self.active_strategy.take_profit_target_premium:
-                            self._execute_exit(
-                                reason="TAKE_PROFIT (-2% Target Achieved)",
-                                pair=pair,
-                                call_ask=call_ask,
-                                put_ask=put_ask,
-                                trade_size=trade_size,
-                            )
-                            break
+                        if combined_buyback <= self.active_strategy.take_profit_target_premium:
+                            tp_breach_count += 1
+                            if time_in_trade >= 20.0 and tp_breach_count >= 3:
+                                self._execute_exit(
+                                    reason="TAKE_PROFIT (-2% Target Achieved)",
+                                    pair=pair,
+                                    call_ask=call_ask,
+                                    put_ask=put_ask,
+                                    trade_size=trade_size,
+                                )
+                                break
+                        else:
+                            tp_breach_count = 0
 
             except Exception as e:
                 logger.error(f"Error in market loop: {e}")
