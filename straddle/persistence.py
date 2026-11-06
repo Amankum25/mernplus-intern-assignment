@@ -27,6 +27,7 @@ class StatePersistence:
     def _default_state(self) -> Dict[str, Any]:
         return {
             "active_trade": None,
+            "orders": [],
             "trade_history": [],
             "logs": [],
             "stats": {
@@ -159,6 +160,48 @@ class StatePersistence:
 
             self._save_to_disk(self.state)
             return completed_record
+
+    def add_order(
+        self,
+        order_id: str,
+        contract: str,
+        side: str,
+        qty: float,
+        filled_qty: float,
+        avg_price: float,
+        status: str,
+    ) -> Dict[str, Any]:
+        """Record or update an order entry."""
+        with self.lock:
+            if "orders" not in self.state:
+                self.state["orders"] = []
+            
+            # Find existing order by id
+            existing = next((o for o in self.state["orders"] if o["order_id"] == order_id), None)
+            if existing:
+                existing.update({
+                    "filled_qty": filled_qty,
+                    "avg_price": avg_price,
+                    "status": status,
+                    "updated_at": time.strftime("%H:%M:%S"),
+                })
+                order_entry = existing
+            else:
+                order_entry = {
+                    "order_id": order_id,
+                    "time": time.strftime("%H:%M:%S"),
+                    "contract": contract,
+                    "side": side.upper(),
+                    "qty": qty,
+                    "filled_qty": filled_qty,
+                    "avg_price": avg_price,
+                    "status": status.upper(),
+                }
+                self.state["orders"].append(order_entry)
+                if len(self.state["orders"]) > 100:
+                    self.state["orders"] = self.state["orders"][-100:]
+            self._save_to_disk(self.state)
+            return order_entry
 
     def clear_active_trade(self) -> None:
         """Clear active trade without recording (e.g. manual reset)."""

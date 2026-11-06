@@ -3,64 +3,58 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>NautilusTrader • BTC Options Straddle Terminal</title>
+  <title>BTC Options Straddle • Quantitative Execution Demo</title>
+  
+  <!-- Inter & JetBrains Mono Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  
   <style>
     :root {
-      --bg: #06090f;
-      --card-bg: #0b111e;
-      --card-border: #1a2333;
-      --card-hover: #121c2f;
-      --text-main: #f1f5f9;
-      --text-muted: #8492a6;
-      --text-dim: #475569;
-      
-      --call-color: #00f0ff;
-      --call-bg: rgba(0, 240, 255, 0.06);
-      --call-border: rgba(0, 240, 255, 0.25);
-      
-      --put-color: #c084fc;
-      --put-bg: rgba(192, 132, 252, 0.06);
-      --put-border: rgba(192, 132, 252, 0.25);
-      
-      --pnl-green: #00f59b;
-      --pnl-green-bg: rgba(0, 245, 155, 0.1);
-      --pnl-red: #ff3366;
-      --pnl-red-bg: rgba(255, 51, 102, 0.1);
-      
-      --primary: #3b82f6;
-      --primary-hover: #2563eb;
-      --warning: #f59e0b;
-      --danger: #ef4444;
+      --bg: #F4F6FA;
+      --card-bg: #FFFFFF;
+      --secondary-bg: #F8FAFC;
+      --primary: #4F46E5;
+      --primary-light: #EEF2FF;
+      --success: #059669;
+      --success-bg: #ECFDF5;
+      --danger: #DC2626;
+      --danger-bg: #FEF2F2;
+      --warning: #D97706;
+      --warning-bg: #FFFBEB;
+      --text-main: #172033;
+      --text-muted: #64748B;
+      --border: #E2E8F0;
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
     
     body {
-      background: var(--bg);
+      background-color: var(--bg);
       color: var(--text-main);
-      font-family: 'Plus Jakarta Sans', sans-serif;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      font-size: 14px;
+      line-height: 1.5;
       min-height: 100vh;
       display: flex;
       flex-direction: column;
-      background-image: 
-        radial-gradient(circle at 15% 10%, rgba(59, 130, 246, 0.08) 0%, transparent 40%),
-        radial-gradient(circle at 85% 10%, rgba(192, 132, 252, 0.06) 0%, transparent 40%);
     }
 
-    /* Scrollbar */
-    ::-webkit-scrollbar { width: 6px; height: 6px; }
-    ::-webkit-scrollbar-track { background: #06090f; }
-    ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 3px; }
-    ::-webkit-scrollbar-thumb:hover { background: #334155; }
+    .font-mono {
+      font-family: 'JetBrains Mono', monospace;
+    }
 
-    /* Top Navigation Header */
+    /* Scrollbars */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: var(--bg); }
+    ::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #94A3B8; }
+
+    /* Header */
     header {
-      background: rgba(11, 17, 30, 0.85);
-      backdrop-filter: blur(12px);
-      border-bottom: 1px solid var(--card-border);
+      background: var(--card-bg);
+      border-bottom: 1px solid var(--border);
       padding: 0.85rem 2rem;
       display: flex;
       justify-content: space-between;
@@ -75,1302 +69,1485 @@
       align-items: center;
       gap: 0.85rem;
     }
-    .brand-icon {
-      background: linear-gradient(135deg, #00f0ff, #3b82f6, #c084fc);
-      width: 36px;
-      height: 36px;
-      border-radius: 9px;
+
+    .brand-logo {
+      width: 34px;
+      height: 34px;
+      background: var(--primary);
+      color: #FFFFFF;
+      border-radius: 8px;
       display: flex;
       align-items: center;
       justify-content: center;
-      box-shadow: 0 0 15px rgba(0, 240, 255, 0.35);
-      color: #06090f;
-      font-weight: 900;
-      font-size: 1.1rem;
-    }
-    .brand-title h1 {
-      font-size: 1.05rem;
-      font-weight: 800;
-      letter-spacing: -0.3px;
-    }
-    .brand-title span {
-      font-size: 0.72rem;
-      color: var(--text-muted);
-      font-family: 'JetBrains Mono', monospace;
-    }
-
-    .header-stats {
-      display: flex;
-      align-items: center;
-      gap: 0.75rem;
-    }
-    .stat-pill {
-      background: #0f1728;
-      border: 1px solid var(--card-border);
-      padding: 0.45rem 0.85rem;
-      border-radius: 8px;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.8rem;
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-    }
-    .stat-pill .label { color: var(--text-muted); font-size: 0.72rem; }
-    .stat-pill .value { font-weight: 700; color: #fff; }
-    .status-pulse {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: var(--pnl-green);
-      box-shadow: 0 0 8px var(--pnl-green);
-      animation: pulse 2s infinite;
-    }
-    @keyframes pulse {
-      0% { box-shadow: 0 0 0 0 rgba(0, 245, 155, 0.6); }
-      70% { box-shadow: 0 0 0 8px rgba(0, 245, 155, 0); }
-      100% { box-shadow: 0 0 0 0 rgba(0, 245, 155, 0); }
-    }
-
-    .btn-qa {
-      background: linear-gradient(135deg, #1e293b, #0f172a);
-      color: #38bdf8;
-      border: 1px solid #38bdf840;
-      padding: 0.45rem 1rem;
-      border-radius: 8px;
-      cursor: pointer;
       font-weight: 700;
-      font-size: 0.8rem;
-      display: flex;
-      align-items: center;
-      gap: 0.4rem;
-      transition: all 0.2s;
-    }
-    .btn-qa:hover {
-      background: #38bdf8;
-      color: #06090f;
-      box-shadow: 0 0 15px rgba(56, 189, 248, 0.4);
-    }
-
-    /* Main Content */
-    main {
-      flex: 1;
-      max-width: 1280px;
-      width: 100%;
-      margin: 0 auto;
-      padding: 1.5rem 1.75rem;
-      display: flex;
-      flex-direction: column;
-      gap: 1.35rem;
-    }
-
-    /* ATM Discovery Strip */
-    .atm-panel {
-      background: var(--card-bg);
-      border: 1px solid var(--card-border);
-      border-radius: 12px;
-      padding: 1.15rem 1.35rem;
-      display: flex;
-      flex-direction: column;
-      gap: 0.85rem;
-    }
-    .atm-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    .atm-title {
-      display: flex;
-      align-items: center;
-      gap: 0.6rem;
-      font-size: 0.95rem;
-      font-weight: 700;
-      color: #38bdf8;
-    }
-    .atm-expiry {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.78rem;
-      color: var(--text-muted);
-      background: #0f1728;
-      padding: 0.25rem 0.65rem;
-      border-radius: 6px;
-      border: 1px solid var(--card-border);
-    }
-    
-    .strike-matrix-row {
-      display: flex;
-      gap: 0.65rem;
-      overflow-x: auto;
-      padding-bottom: 0.25rem;
-    }
-    .strike-chip {
-      flex: 1;
-      min-width: 130px;
-      background: #0a0f1d;
-      border: 1px solid var(--card-border);
-      border-radius: 8px;
-      padding: 0.6rem 0.75rem;
-      display: flex;
-      flex-direction: column;
-      gap: 0.2rem;
-      text-align: center;
-      transition: all 0.2s;
-    }
-    .strike-chip.is-atm {
-      background: rgba(56, 189, 248, 0.1);
-      border: 1px solid #38bdf8;
-      box-shadow: 0 0 12px rgba(56, 189, 248, 0.25);
-    }
-    .strike-chip .strike-val {
-      font-family: 'JetBrains Mono', monospace;
       font-size: 1rem;
-      font-weight: 800;
-      color: #fff;
-    }
-    .strike-chip.is-atm .strike-val { color: #38bdf8; }
-    .strike-chip .strike-dist {
-      font-size: 0.7rem;
-      color: var(--text-muted);
-      font-family: 'JetBrains Mono', monospace;
-    }
-    .strike-chip.is-atm .strike-badge {
-      font-size: 0.65rem;
-      font-weight: 800;
-      color: #06090f;
-      background: #38bdf8;
-      border-radius: 4px;
-      padding: 0.1rem 0.4rem;
-      margin-top: 0.2rem;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
     }
 
-    /* Core Straddle Terminal Card */
-    .terminal-card {
-      background: var(--card-bg);
-      border: 1px solid var(--card-border);
-      border-radius: 14px;
-      padding: 1.5rem;
-      display: flex;
-      flex-direction: column;
-      gap: 1.25rem;
-      box-shadow: 0 10px 30px rgba(0,0,0,0.4);
-      position: relative;
-    }
-    .terminal-card.active-trade {
-      border: 1px solid rgba(0, 245, 155, 0.4);
-      box-shadow: 0 0 25px rgba(0, 245, 155, 0.1);
-    }
-
-    /* PnL & Status Banner */
-    .pnl-banner {
-      display: grid;
-      grid-template-columns: 2fr 1.2fr 1.2fr 1.2fr;
-      gap: 1rem;
-      background: #080d18;
-      border: 1px solid var(--card-border);
-      border-radius: 10px;
-      padding: 1.15rem 1.4rem;
-      align-items: center;
-    }
-    .hero-pnl {
-      display: flex;
-      flex-direction: column;
-      gap: 0.25rem;
-    }
-    .hero-pnl .pnl-label {
-      font-size: 0.72rem;
+    .brand-text h1 {
+      font-size: 1rem;
       font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.8px;
-      color: var(--text-muted);
-    }
-    .hero-pnl .pnl-value {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 2.1rem;
-      font-weight: 900;
-      line-height: 1;
-    }
-    .pnl-pos { color: var(--pnl-green); text-shadow: 0 0 15px rgba(0, 245, 155, 0.3); }
-    .pnl-neg { color: var(--pnl-red); text-shadow: 0 0 15px rgba(255, 51, 102, 0.3); }
-    .pnl-neutral { color: #94a3b8; }
-
-    .stat-box {
-      display: flex;
-      flex-direction: column;
-      gap: 0.25rem;
-    }
-    .stat-box .title {
-      font-size: 0.72rem;
-      color: var(--text-muted);
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-    }
-    .stat-box .num {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 1.15rem;
-      font-weight: 700;
-      color: #fff;
+      color: var(--text-main);
+      line-height: 1.2;
     }
 
-    /* Position Legs Grid (Call in Cyan, Put in Purple) */
-    .legs-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 1.15rem;
-    }
-    
-    .leg-card {
-      border-radius: 10px;
-      padding: 1.15rem 1.25rem;
-      display: flex;
-      flex-direction: column;
-      gap: 0.85rem;
-      position: relative;
-      transition: all 0.2s;
-    }
-    .leg-card.call {
-      background: var(--call-bg);
-      border: 1px solid var(--call-border);
-    }
-    .leg-card.put {
-      background: var(--put-bg);
-      border: 1px solid var(--put-border);
-    }
-    .leg-card.is-open {
-      animation: glowPulse 2.5s infinite alternate;
-    }
-    @keyframes glowPulse {
-      0% { box-shadow: 0 0 10px rgba(0, 240, 255, 0.1); }
-      100% { box-shadow: 0 0 20px rgba(0, 240, 255, 0.25); }
-    }
-
-    .leg-card-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    .leg-title {
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      font-weight: 800;
-      font-size: 0.95rem;
-    }
-    .leg-card.call .leg-title { color: var(--call-color); }
-    .leg-card.put .leg-title { color: var(--put-color); }
-    
-    .leg-badge {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.72rem;
-      font-weight: 700;
-      padding: 0.2rem 0.55rem;
-      border-radius: 5px;
-    }
-    .leg-card.call .leg-badge { background: rgba(0, 240, 255, 0.15); color: var(--call-color); border: 1px solid var(--call-border); }
-    .leg-card.put .leg-badge { background: rgba(192, 132, 252, 0.15); color: var(--put-color); border: 1px solid var(--put-border); }
-
-    .contract-sym {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.92rem;
-      font-weight: 700;
-      color: #fff;
-    }
-
-    .quote-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr 1fr;
-      gap: 0.5rem;
-      background: rgba(0, 0, 0, 0.3);
-      padding: 0.65rem 0.85rem;
-      border-radius: 8px;
-    }
-    .quote-item {
-      display: flex;
-      flex-direction: column;
-      gap: 0.15rem;
-    }
-    .quote-item .q-label { font-size: 0.68rem; color: var(--text-muted); }
-    .quote-item .q-val {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.95rem;
-      font-weight: 700;
-    }
-
-    /* Risk Targets Visual Corridor */
-    .risk-corridor {
-      background: #090e1a;
-      border: 1px solid var(--card-border);
-      border-radius: 10px;
-      padding: 0.85rem 1.25rem;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.82rem;
-    }
-    .target-pill {
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-    }
-    .target-sl { color: var(--pnl-red); font-weight: 700; }
-    .target-tp { color: var(--pnl-green); font-weight: 700; }
-
-    /* Action Buttons Row */
-    .size-selector-strip {
-      background: #090e1b;
-      border: 1px solid var(--card-border);
-      border-radius: 8px;
-      padding: 0.65rem 1rem;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 0.75rem;
-    }
-    .size-label {
-      font-size: 0.8rem;
-      color: var(--text-muted);
-      display: flex;
-      align-items: center;
-      gap: 0.4rem;
-    }
-    .size-pills {
-      display: flex;
-      gap: 0.45rem;
-    }
-    .size-pill {
-      background: #111a2d;
-      border: 1px solid var(--card-border);
-      color: #94a3b8;
-      padding: 0.3rem 0.65rem;
-      border-radius: 6px;
-      font-family: 'JetBrains Mono', monospace;
+    .brand-text span {
       font-size: 0.75rem;
-      font-weight: 700;
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-    .size-pill.active {
-      background: rgba(56, 189, 248, 0.15);
-      border-color: #38bdf8;
-      color: #38bdf8;
-    }
-    .open-qty-badge {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.78rem;
-      background: #0f1728;
-      border: 1px solid var(--card-border);
-      padding: 0.3rem 0.65rem;
-      border-radius: 6px;
       color: var(--text-muted);
     }
-    .open-qty-badge strong { color: #fff; }
 
-    .action-row {
-      display: grid;
-      grid-template-columns: 1.2fr 1.5fr auto 1fr;
-      gap: 0.85rem;
-    }
-    .btn-scale {
-      background: linear-gradient(135deg, #7c3aed, #9333ea);
-      color: #fff;
-    }
-    .btn-scale:hover:not(:disabled) {
-      background: linear-gradient(135deg, #9333ea, #a855f7);
-      box-shadow: 0 0 20px rgba(168, 85, 247, 0.4);
-    }
-    .btn {
-      padding: 0.85rem 1.25rem;
-      border-radius: 10px;
-      border: none;
-      cursor: pointer;
-      font-family: 'Plus Jakarta Sans', sans-serif;
-      font-weight: 700;
-      font-size: 0.95rem;
+    .header-status {
       display: flex;
       align-items: center;
-      justify-content: center;
-      gap: 0.5rem;
-      transition: all 0.2s;
-    }
-    .btn:disabled {
-      opacity: 0.4;
-      cursor: not-allowed;
-      filter: grayscale(0.8);
-    }
-    .btn-lvl1 {
-      background: linear-gradient(135deg, #1e3a8a, #2563eb);
-      color: #fff;
-    }
-    .btn-lvl1:hover:not(:disabled) {
-      background: linear-gradient(135deg, #2563eb, #3b82f6);
-      box-shadow: 0 0 20px rgba(59, 130, 246, 0.4);
-    }
-    .btn-lvl2 {
-      background: linear-gradient(135deg, #065f46, #059669);
-      color: #fff;
-    }
-    .btn-lvl2:hover:not(:disabled) {
-      background: linear-gradient(135deg, #059669, #10b981);
-      box-shadow: 0 0 20px rgba(16, 185, 129, 0.4);
-    }
-    .btn-close {
-      background: linear-gradient(135deg, #991b1b, #dc2626);
-      color: #fff;
-    }
-    .btn-close:hover:not(:disabled) {
-      background: linear-gradient(135deg, #dc2626, #ef4444);
-      box-shadow: 0 0 20px rgba(239, 68, 68, 0.4);
-    }
-
-    /* Interviewer Demo Shock Panel */
-    .shock-strip {
-      background: rgba(245, 158, 11, 0.05);
-      border: 1px dashed rgba(245, 158, 11, 0.3);
-      border-radius: 8px;
-      padding: 0.75rem 1rem;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    .shock-strip p {
-      font-size: 0.8rem;
-      color: #fbbf24;
-      font-weight: 600;
-    }
-    .shock-btn-group {
-      display: flex;
       gap: 0.6rem;
     }
-    .btn-shock {
-      background: #172033;
-      border: 1px solid #334155;
-      color: #cbd5e1;
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.25rem 0.6rem;
+      border-radius: 6px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+    }
+
+    .badge-primary { background: var(--primary-light); color: var(--primary); border: 1px solid #C7D2FE; }
+    .badge-success { background: var(--success-bg); color: var(--success); border: 1px solid #A7F3D0; }
+    .badge-danger { background: var(--danger-bg); color: var(--danger); border: 1px solid #FECACA; }
+    .badge-warning { background: var(--warning-bg); color: var(--warning); border: 1px solid #FDE68A; }
+    .badge-neutral { background: var(--secondary-bg); color: var(--text-muted); border: 1px solid var(--border); }
+
+    .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+
+    .btn-header {
+      background: var(--secondary-bg);
+      border: 1px solid var(--border);
+      color: var(--text-main);
       padding: 0.35rem 0.75rem;
       border-radius: 6px;
       font-size: 0.75rem;
-      font-family: 'JetBrains Mono', monospace;
-      font-weight: 700;
+      font-weight: 600;
       cursor: pointer;
-      transition: all 0.2s;
-    }
-    .btn-shock:hover {
-      background: #2563eb;
-      color: #fff;
-      border-color: #3b82f6;
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      transition: all 0.15s ease;
     }
 
-    /* Log Stream & History Tabs */
-    .tabs-header {
+    .btn-header:hover {
+      background: #E2E8F0;
+    }
+
+    /* Main Container */
+    main {
+      max-width: 1380px;
+      margin: 1.5rem auto;
+      padding: 0 1.5rem 3rem;
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+    }
+
+    /* Cards */
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1.25rem;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+    }
+
+    .card-header {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      border-bottom: 1px solid var(--card-border);
-      padding-bottom: 0.5rem;
+      margin-bottom: 1rem;
+      padding-bottom: 0.75rem;
+      border-bottom: 1px solid var(--border);
     }
-    .tab-pills {
-      display: flex;
-      gap: 0.5rem;
-    }
-    .tab-btn {
-      background: transparent;
-      border: none;
-      color: var(--text-muted);
-      font-family: 'Plus Jakarta Sans', sans-serif;
-      font-weight: 700;
+
+    .card-title {
       font-size: 0.85rem;
-      padding: 0.4rem 0.85rem;
-      border-radius: 6px;
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-    .tab-btn.active {
-      background: #1e293b;
-      color: #38bdf8;
-    }
-    .tab-controls {
-      display: flex;
-      gap: 0.5rem;
-      align-items: center;
-    }
-    .btn-mini {
-      background: #0f1728;
-      border: 1px solid var(--card-border);
-      color: var(--text-muted);
-      padding: 0.25rem 0.55rem;
-      border-radius: 5px;
-      font-size: 0.72rem;
-      cursor: pointer;
-    }
-    .btn-mini:hover { color: #fff; border-color: #38bdf8; }
-
-    .terminal-container {
-      background: #050811;
-      border: 1px solid #162032;
-      border-radius: 8px;
-      padding: 0.85rem 1rem;
-      height: 250px;
-      overflow-y: auto;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.8rem;
-      display: flex;
-      flex-direction: column;
-      gap: 0.4rem;
-    }
-    .log-row {
-      display: flex;
-      align-items: flex-start;
-      gap: 0.65rem;
-      line-height: 1.45;
-    }
-    .log-time { color: var(--text-dim); min-width: 65px; }
-    .log-badge {
-      font-size: 0.68rem;
       font-weight: 700;
-      padding: 0.1rem 0.45rem;
-      border-radius: 4px;
       text-transform: uppercase;
-      min-width: 70px;
-      text-align: center;
-    }
-    .badge-info { background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); }
-    .badge-success { background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); }
-    .badge-danger { background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); }
-    .badge-warning { background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); }
-    .badge-pnl-pos { background: rgba(0, 245, 155, 0.2); color: #00f59b; border: 1px solid rgba(0, 245, 155, 0.4); font-weight: 800; }
-    .badge-pnl-neg { background: rgba(255, 51, 102, 0.2); color: #ff3366; border: 1px solid rgba(255, 51, 102, 0.4); font-weight: 800; }
-    
-    .log-text { color: #cbd5e1; flex: 1; word-break: break-all; }
-    .log-text.highlight-pos { color: #00f59b; font-weight: 600; }
-    .log-text.highlight-neg { color: #ff3366; font-weight: 600; }
-
-    /* Trade History Table */
-    .history-table {
-      width: 100%;
-      border-collapse: collapse;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.78rem;
-    }
-    .history-table th {
-      text-align: left;
-      padding: 0.5rem;
+      letter-spacing: 0.5px;
       color: var(--text-muted);
-      border-bottom: 1px solid var(--card-border);
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    /* Market Discovery Grid */
+    .market-stats-grid {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 1rem;
+      margin-bottom: 1.25rem;
+    }
+
+    .stat-box {
+      background: var(--secondary-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.75rem 1rem;
+    }
+
+    .stat-label {
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      margin-bottom: 0.25rem;
       font-weight: 600;
     }
-    .history-table td {
-      padding: 0.55rem 0.5rem;
-      border-bottom: 1px solid #111a2c;
+
+    .stat-value {
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: var(--text-main);
+      font-family: 'JetBrains Mono', monospace;
     }
 
-    /* Modal */
+    /* Strike Selector Horizontal Row */
+    .strike-selector-container {
+      background: var(--secondary-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.85rem 1rem;
+    }
+
+    .strike-selector-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 0.75rem;
+    }
+
+    .strike-chips {
+      display: flex;
+      gap: 0.6rem;
+      overflow-x: auto;
+      padding-bottom: 0.25rem;
+    }
+
+    .strike-chip {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.45rem 0.85rem;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.82rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-width: 95px;
+      transition: all 0.15s ease;
+      position: relative;
+    }
+
+    .strike-chip:hover {
+      border-color: var(--primary);
+    }
+
+    .strike-chip.is-atm {
+      border: 2px solid var(--primary);
+      background: var(--primary-light);
+      color: var(--primary);
+    }
+
+    .strike-chip-distance {
+      font-size: 0.68rem;
+      font-weight: 500;
+      color: var(--text-muted);
+      margin-top: 0.15rem;
+    }
+
+    .strike-chip.is-atm .strike-chip-distance {
+      color: var(--primary);
+      font-weight: 600;
+    }
+
+    .atm-tag {
+      position: absolute;
+      top: -8px;
+      background: var(--primary);
+      color: #FFFFFF;
+      font-size: 0.6rem;
+      font-weight: 700;
+      padding: 1px 5px;
+      border-radius: 4px;
+      text-transform: uppercase;
+    }
+
+    /* Option Pair Side by Side */
+    .option-pair-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.25rem;
+    }
+
+    .option-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1.25rem;
+      position: relative;
+    }
+
+    .option-card.call-card {
+      border-top: 4px solid var(--primary);
+    }
+
+    .option-card.put-card {
+      border-top: 4px solid var(--success);
+    }
+
+    .option-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1rem;
+    }
+
+    .option-symbol {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.85rem;
+      font-weight: 700;
+      color: var(--text-main);
+    }
+
+    .option-metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 0.75rem;
+      background: var(--secondary-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.85rem;
+      margin-bottom: 0.85rem;
+    }
+
+    .metric-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.25rem 0;
+    }
+
+    .metric-name {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      font-weight: 500;
+    }
+
+    .metric-val {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--text-main);
+    }
+
+    .pair-validation-banner {
+      background: var(--success-bg);
+      border: 1px solid #A7F3D0;
+      color: var(--success);
+      padding: 0.65rem 1rem;
+      border-radius: 8px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.8rem;
+      font-weight: 600;
+      margin-top: 1rem;
+    }
+
+    .pair-validation-banner.invalid {
+      background: var(--danger-bg);
+      border-color: #FECACA;
+      color: var(--danger);
+    }
+
+    /* Strategy Configuration & Execution Grid */
+    .strategy-layout {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.25rem;
+    }
+
+    .level-card {
+      background: var(--secondary-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1.25rem;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+
+    .level-header {
+      margin-bottom: 0.75rem;
+    }
+
+    .level-title {
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: var(--text-main);
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .level-desc {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      margin-top: 0.35rem;
+      line-height: 1.4;
+    }
+
+    .risk-rules {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.75rem;
+      margin: 0.75rem 0;
+      font-size: 0.78rem;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .rule-item {
+      display: flex;
+      justify-content: space-between;
+      padding: 0.2rem 0;
+    }
+
+    .rule-label { color: var(--text-muted); }
+    .rule-val { font-weight: 600; }
+
+    .btn {
+      padding: 0.65rem 1rem;
+      border-radius: 6px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      transition: all 0.15s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.4rem;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+    }
+
+    .btn-primary {
+      background: var(--primary);
+      color: #FFFFFF;
+    }
+    .btn-primary:hover { background: #4338CA; }
+
+    .btn-success {
+      background: var(--success);
+      color: #FFFFFF;
+    }
+    .btn-success:hover { background: #047857; }
+
+    .btn-danger {
+      background: var(--danger);
+      color: #FFFFFF;
+    }
+    .btn-danger:hover { background: #B91C1C; }
+
+    .btn-secondary {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      color: var(--text-main);
+    }
+    .btn-secondary:hover { background: var(--secondary-bg); }
+
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    /* Active Strategy Monitor */
+    .monitor-box {
+      background: var(--secondary-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem;
+      margin-top: 1.25rem;
+    }
+
+    .monitor-stats-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 0.75rem;
+      margin-top: 0.75rem;
+    }
+
+    /* Orders and Positions Tabs */
+    .tabs-header {
+      display: flex;
+      gap: 0.5rem;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 0.75rem;
+      margin-bottom: 1rem;
+    }
+
+    .tab-btn {
+      background: none;
+      border: none;
+      padding: 0.4rem 0.85rem;
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      cursor: pointer;
+      border-radius: 6px;
+      transition: all 0.15s ease;
+    }
+
+    .tab-btn.active {
+      background: var(--primary-light);
+      color: var(--primary);
+    }
+
+    /* Tables */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+      font-size: 0.8rem;
+    }
+
+    th {
+      background: var(--secondary-bg);
+      color: var(--text-muted);
+      font-weight: 600;
+      padding: 0.65rem 0.85rem;
+      border-bottom: 1px solid var(--border);
+      text-transform: uppercase;
+      font-size: 0.7rem;
+      letter-spacing: 0.3px;
+    }
+
+    td {
+      padding: 0.7rem 0.85rem;
+      border-bottom: 1px solid var(--border);
+      color: var(--text-main);
+    }
+
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: var(--secondary-bg); }
+
+    /* Execution Logs */
+    .log-feed-container {
+      max-height: 280px;
+      overflow-y: auto;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+    }
+
+    /* Pre-flight Confirmation Modal */
     .modal-overlay {
       position: fixed;
-      top: 0; left: 0; right: 0; bottom: 0;
-      background: rgba(0, 0, 0, 0.8);
-      backdrop-filter: blur(8px);
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(15, 23, 42, 0.45);
+      backdrop-filter: blur(4px);
       display: none;
       align-items: center;
       justify-content: center;
-      z-index: 200;
-      padding: 1.5rem;
+      z-index: 1000;
     }
-    .modal-box {
-      background: #0d1527;
-      border: 1px solid var(--card-border);
-      border-radius: 14px;
-      max-width: 850px;
+
+    .modal-card {
+      background: #FFFFFF;
+      border-radius: 12px;
+      border: 1px solid var(--border);
       width: 100%;
-      max-height: 85vh;
-      display: flex;
-      flex-direction: column;
-      box-shadow: 0 20px 50px rgba(0,0,0,0.6);
+      max-width: 480px;
+      padding: 1.5rem;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1);
     }
+
     .modal-header {
-      padding: 1.25rem 1.5rem;
-      border-bottom: 1px solid var(--card-border);
       display: flex;
       justify-content: space-between;
       align-items: center;
+      margin-bottom: 1rem;
+      padding-bottom: 0.5rem;
+      border-bottom: 1px solid var(--border);
     }
-    .modal-header h3 { font-size: 1.15rem; font-weight: 800; color: #38bdf8; }
-    .modal-close { background: transparent; border: none; color: #fff; font-size: 1.5rem; cursor: pointer; }
+
+    .modal-title {
+      font-size: 1rem;
+      font-weight: 700;
+      color: var(--text-main);
+    }
+
     .modal-body {
-      padding: 1.5rem;
-      overflow-y: auto;
+      font-size: 0.85rem;
       display: flex;
       flex-direction: column;
-      gap: 1.25rem;
+      gap: 0.75rem;
+      margin-bottom: 1.25rem;
     }
-    .qa-card {
-      background: #080d19;
-      border: 1px solid var(--card-border);
-      border-radius: 8px;
-      padding: 1rem 1.25rem;
-    }
-    .qa-q { font-weight: 700; color: #fff; margin-bottom: 0.4rem; font-size: 0.92rem; }
-    .qa-a { color: var(--text-muted); font-size: 0.85rem; line-height: 1.5; white-space: pre-line; }
 
-    @media (max-width: 900px) {
-      .legs-grid, .pnl-banner, .action-row { grid-template-columns: 1fr; }
+    .modal-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 0.35rem 0;
+      border-bottom: 1px dashed var(--border);
+    }
+
+    .modal-label { color: var(--text-muted); }
+    .modal-val { font-weight: 600; font-family: 'JetBrains Mono', monospace; }
+
+    .modal-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 0.75rem;
     }
   </style>
 </head>
 <body>
 
-  <!-- Top Navigation Header -->
+  <!-- SECTION 1: EXCHANGE AND ENGINE CONNECTION -->
   <header>
     <div class="brand">
-      <div class="brand-icon">⚡</div>
-      <div class="brand-title">
-        <h1>NautilusTrader • BTC Options Straddle</h1>
-        <span>QUANTITATIVE EXECUTION TERMINAL • BYBIT V5</span>
+      <div class="brand-logo">N</div>
+      <div class="brand-text">
+        <h1>BTC Options Straddle</h1>
+        <span>Quantitative Execution Demo</span>
       </div>
     </div>
-    <div class="header-stats">
-      <div class="stat-pill">
-        <div class="status-pulse"></div>
-        <span class="label">ENGINE:</span>
-        <span class="value" id="engineEnv">BYBIT DEMO</span>
+
+    <div class="header-status">
+      <div class="badge badge-neutral" id="envBadge">
+        <span class="dot"></span> BYBIT TESTNET
       </div>
-      <div class="stat-pill">
-        <span class="label">EQUITY:</span>
-        <span class="value" id="walletBalance">$49,925.56 USDT</span>
+      <div class="badge badge-success" id="marketDataBadge">
+        <span class="dot"></span> PUBLIC MARKET DATA — CONNECTED
       </div>
-      <div class="stat-pill">
-        <span class="label">BTC INDEX:</span>
-        <span class="value" id="btcIndexHeader">$76,054.10</span>
+      <div class="badge badge-success" id="privateApiBadge">
+        <span class="dot"></span> PRIVATE API — AUTHENTICATED
       </div>
-      <div class="stat-pill">
-        <span class="label">REALIZED PnL:</span>
-        <span class="value pnl-pos" id="cumPnlText">+$0.00</span>
+      <div class="badge badge-primary" id="engineBadge">
+        <span class="dot"></span> NAUTILUSTRADER — RUNNING
       </div>
-      <button class="btn-qa" onclick="openModal()">
-        <span>📚</span> 10 Interview Q&A
+      <button class="btn-header" onclick="testConnection()" id="refreshConnBtn">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+        Refresh Connection
       </button>
     </div>
   </header>
 
   <main>
-    <!-- ATM Strike Discovery Matrix -->
-    <section class="atm-panel">
-      <div class="atm-header">
-        <div class="atm-title">
-          <span>🎯</span> Dynamic ATM Strike Discovery Matrix (Level 1 Requirement)
+    <!-- SECTION 2: BTC OPTIONS DISCOVERY AND ATM SELECTION -->
+    <section class="card">
+      <div class="card-header">
+        <div class="card-title">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+          BTC Options Market
         </div>
-        <div class="atm-expiry" id="expiryLabel">
-          Expiry: 07 NOV 2026 08:00 UTC (Next Delivery)
+        <div style="display: flex; align-items: center; gap: 0.75rem;">
+          <span style="font-size: 0.75rem; color: var(--text-muted);">Expiry:</span>
+          <select id="expirySelect" onchange="onExpiryChanged()" style="background: var(--secondary-bg); border: 1px solid var(--border); padding: 0.25rem 0.5rem; border-radius: 6px; font-size: 0.78rem; font-weight: 600; color: var(--text-main); cursor: pointer;">
+            <option value="">Loading expiries...</option>
+          </select>
         </div>
       </div>
-      <div class="strike-matrix-row" id="strikeMatrixRow">
-        <div class="strike-chip"><span class="strike-val">$75,000</span><span class="strike-dist">Δ $1,054</span></div>
-        <div class="strike-chip"><span class="strike-val">$75,500</span><span class="strike-dist">Δ $554</span></div>
-        <div class="strike-chip is-atm">
-          <span class="strike-val">$76,000</span>
-          <span class="strike-dist">Δ $54.10 (Closest)</span>
-          <span class="strike-badge">ATM Strike Selected</span>
-        </div>
-        <div class="strike-chip"><span class="strike-val">$76,500</span><span class="strike-dist">Δ $446</span></div>
-        <div class="strike-chip"><span class="strike-val">$77,000</span><span class="strike-dist">Δ $946</span></div>
-      </div>
-    </section>
 
-    <!-- Core Straddle Control & Live Valuation -->
-    <section class="terminal-card" id="mainTerminalCard">
-      <!-- PnL & Status Banner -->
-      <div class="pnl-banner">
-        <div class="hero-pnl">
-          <span class="pnl-label">Live Straddle PnL (Ask Valuation)</span>
-          <span class="pnl-value pnl-neutral" id="pnlHeroText">+0.00% ($0.00)</span>
+      <!-- Market Stats Grid -->
+      <div class="market-stats-grid">
+        <div class="stat-box">
+          <div class="stat-label">BTC Underlying Price</div>
+          <div class="stat-value" id="btcPriceVal">$0.00</div>
         </div>
         <div class="stat-box">
-          <span class="title">Combined Entry</span>
-          <span class="num" id="combinedEntryText">$0.00</span>
+          <div class="stat-label">Target Expiry</div>
+          <div class="stat-value" id="targetExpiryVal" style="font-size: 0.95rem;">--</div>
         </div>
         <div class="stat-box">
-          <span class="title">Buyback Cost</span>
-          <span class="num" id="buybackCostText">$0.00</span>
+          <div class="stat-label">Available Contracts</div>
+          <div class="stat-value" id="availableContractsVal">0</div>
         </div>
         <div class="stat-box">
-          <span class="title">Strategy State</span>
-          <span class="num" id="stateText" style="color:#38bdf8;">IDLE</span>
+          <div class="stat-label">Calculated ATM Strike</div>
+          <div class="stat-value" id="atmStrikeVal" style="color: var(--primary);">$0</div>
         </div>
-      </div>
-
-      <!-- Distinct Call & Put Legs Grid -->
-      <div class="legs-grid">
-        <!-- Call Leg (Electric Cyan) -->
-        <div class="leg-card call" id="callCard">
-          <div class="leg-card-header">
-            <div class="leg-title">
-              <span>📈</span> CALL OPTION (SELL LEG)
-            </div>
-            <div class="leg-badge" id="callStatusBadge">READY TO SELL</div>
-          </div>
-          <div class="contract-sym" id="callSymbolText">BTC-7NOV26-76000-C-USDT</div>
-          <div class="quote-grid">
-            <div class="quote-item">
-              <span class="q-label">Entry Fill:</span>
-              <span class="q-val" id="callEntryText">$0.00</span>
-            </div>
-            <div class="quote-item">
-              <span class="q-label">Live Ask:</span>
-              <span class="q-val" id="callAskText" style="color:var(--call-color);">$0.00</span>
-            </div>
-            <div class="quote-item">
-              <span class="q-label">Live Bid:</span>
-              <span class="q-val" id="callBidText">$0.00</span>
-            </div>
-          </div>
-        </div>
-
-        <!-- Put Leg (Electric Purple) -->
-        <div class="leg-card put" id="putCard">
-          <div class="leg-card-header">
-            <div class="leg-title">
-              <span>📉</span> PUT OPTION (SELL LEG)
-            </div>
-            <div class="leg-badge" id="putStatusBadge">READY TO SELL</div>
-          </div>
-          <div class="contract-sym" id="putSymbolText">BTC-7NOV26-76000-P-USDT</div>
-          <div class="quote-grid">
-            <div class="quote-item">
-              <span class="q-label">Entry Fill:</span>
-              <span class="q-val" id="putEntryText">$0.00</span>
-            </div>
-            <div class="quote-item">
-              <span class="q-label">Live Ask:</span>
-              <span class="q-val" id="putAskText" style="color:var(--put-color);">$0.00</span>
-            </div>
-            <div class="quote-item">
-              <span class="q-label">Live Bid:</span>
-              <span class="q-val" id="putBidText">$0.00</span>
-            </div>
+        <div class="stat-box">
+          <div class="stat-label">Market Data Freshness</div>
+          <div class="stat-value" id="dataFreshnessVal" style="font-size: 0.85rem; color: var(--success); display: flex; align-items: center; gap: 0.35rem; margin-top: 0.3rem;">
+            <span class="dot" style="background: var(--success);"></span> LIVE WS / REST
           </div>
         </div>
       </div>
 
-      <!-- Risk Corridor Targets -->
-      <div class="risk-corridor">
-        <div class="target-pill">
-          <span>🛑 Stop-Loss (+1%):</span>
-          <span class="target-sl" id="slTargetVal">$0.00</span>
+      <!-- Strike Selector Horizontal Row -->
+      <div class="strike-selector-container">
+        <div class="strike-selector-header">
+          <span style="font-size: 0.75rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">
+            Available Strike Prices (Select ATM or Adjacent Strike):
+          </span>
+          <span style="font-size: 0.72rem; color: var(--text-muted);">Auto ATM Selection Enabled</span>
         </div>
-        <div class="target-pill">
-          <span>⚖️ Status:</span>
-          <span id="riskDistanceText" style="color:var(--text-muted);">Awaiting Execution</span>
-        </div>
-        <div class="target-pill">
-          <span>🎯 Take-Profit (-2%):</span>
-          <span class="target-tp" id="tpTargetVal">$0.00</span>
-        </div>
-      </div>
-
-      <!-- Trade Size & Multiple Positions Selector -->
-      <div class="size-selector-strip">
-        <div class="size-label">
-          <span>📦</span> <strong>Trade Size (Multiple Contracts / Lots):</strong>
-        </div>
-        <div class="size-pills">
-          <button class="size-pill active" id="pill-001" onclick="setSize(0.01)">0.01 BTC (1 Lot)</button>
-          <button class="size-pill" id="pill-002" onclick="setSize(0.02)">0.02 BTC (2 Lots)</button>
-          <button class="size-pill" id="pill-005" onclick="setSize(0.05)">0.05 BTC (5 Lots)</button>
-          <button class="size-pill" id="pill-010" onclick="setSize(0.10)">0.10 BTC (10 Lots)</button>
-        </div>
-        <div class="open-qty-badge" id="openQtyBadge">
-          Open: <strong>0.00 BTC</strong>
-        </div>
-      </div>
-
-      <!-- Action Buttons -->
-      <div class="action-row">
-        <button id="btnLevel1" class="btn btn-lvl1" onclick="startStraddle(1)">
-          ⚡ Execute Level 1 (Naked Straddle)
-        </button>
-        <button id="btnLevel2" class="btn btn-lvl2" onclick="startStraddle(2)">
-          🛡️ Execute Level 2 (1% SL / 2% TP)
-        </button>
-        <button id="btnScaleIn" class="btn btn-scale" onclick="scaleIn()" style="display:none;">
-          ➕ Add Position (Scale In)
-        </button>
-        <button id="btnCloseAll" class="btn btn-close" onclick="stopStraddle()">
-          🛑 Close Positions (reduce_only=True)
-        </button>
-      </div>
-
-      <!-- Interviewer Shock Strip -->
-      <div class="shock-strip">
-        <p>💡 <strong>Interviewer Demo Panel:</strong> Simulate live price movements to trigger automated exits:</p>
-        <div class="shock-btn-group">
-          <button class="btn-shock" onclick="triggerShock('STOP_LOSS')">⚡ Trigger +1.5% SL Shock</button>
-          <button class="btn-shock" onclick="triggerShock('TAKE_PROFIT')">⚡ Trigger -2.5% TP Shock</button>
+        <div class="strike-chips" id="strikeChipsContainer">
+          <div style="font-size: 0.8rem; color: var(--text-muted);">Discovering active option strikes from Bybit...</div>
         </div>
       </div>
     </section>
 
-    <!-- Logs & History Section -->
-    <section class="terminal-card">
+    <!-- SECTION 3: SELECTED CALL AND PUT OPTION PAIR -->
+    <section class="card">
+      <div class="card-header">
+        <div class="card-title">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+          Selected Call and Put Option Pair
+        </div>
+        <div id="pairStatusBadge" class="badge badge-success">
+          <span class="dot"></span> PAIR VALIDATED
+        </div>
+      </div>
+
+      <div class="option-pair-grid">
+        <!-- Call Option Card -->
+        <div class="option-card call-card">
+          <div class="option-header">
+            <div>
+              <span class="badge badge-primary" style="margin-bottom: 0.25rem;">CALL OPTION (SELL LEG)</span>
+              <div class="option-symbol" id="callSymbolVal">BTC-OPTIONS-CALL</div>
+            </div>
+            <div class="badge badge-neutral" id="callTradableBadge">TRADABLE</div>
+          </div>
+          <div class="option-metrics-grid">
+            <div class="metric-row">
+              <span class="metric-name">Strike Price</span>
+              <span class="metric-val" id="callStrikeVal">$0</span>
+            </div>
+            <div class="metric-row">
+              <span class="metric-name">Expiry</span>
+              <span class="metric-val" id="callExpiryVal">--</span>
+            </div>
+            <div class="metric-row">
+              <span class="metric-name">Best Bid</span>
+              <span class="metric-val" id="callBidVal" style="color: var(--success);">$0.00</span>
+            </div>
+            <div class="metric-row">
+              <span class="metric-name">Bid Quantity</span>
+              <span class="metric-val" id="callBidQtyVal">0.00 BTC</span>
+            </div>
+            <div class="metric-row">
+              <span class="metric-name">Best Ask</span>
+              <span class="metric-val" id="callAskVal" style="color: var(--danger);">$0.00</span>
+            </div>
+            <div class="metric-row">
+              <span class="metric-name">Ask Quantity</span>
+              <span class="metric-val" id="callAskQtyVal">0.00 BTC</span>
+            </div>
+          </div>
+          <div style="font-size: 0.72rem; color: var(--text-muted); display: flex; justify-content: space-between;">
+            <span>Underlying: BTCUSDT</span>
+            <span id="callFreshnessVal">Quote Freshness: Live</span>
+          </div>
+        </div>
+
+        <!-- Put Option Card -->
+        <div class="option-card put-card">
+          <div class="option-header">
+            <div>
+              <span class="badge badge-success" style="margin-bottom: 0.25rem;">PUT OPTION (SELL LEG)</span>
+              <div class="option-symbol" id="putSymbolVal">BTC-OPTIONS-PUT</div>
+            </div>
+            <div class="badge badge-neutral" id="putTradableBadge">TRADABLE</div>
+          </div>
+          <div class="option-metrics-grid">
+            <div class="metric-row">
+              <span class="metric-name">Strike Price</span>
+              <span class="metric-val" id="putStrikeVal">$0</span>
+            </div>
+            <div class="metric-row">
+              <span class="metric-name">Expiry</span>
+              <span class="metric-val" id="putExpiryVal">--</span>
+            </div>
+            <div class="metric-row">
+              <span class="metric-name">Best Bid</span>
+              <span class="metric-val" id="putBidVal" style="color: var(--success);">$0.00</span>
+            </div>
+            <div class="metric-row">
+              <span class="metric-name">Bid Quantity</span>
+              <span class="metric-val" id="putBidQtyVal">0.00 BTC</span>
+            </div>
+            <div class="metric-row">
+              <span class="metric-name">Best Ask</span>
+              <span class="metric-val" id="putAskVal" style="color: var(--danger);">$0.00</span>
+            </div>
+            <div class="metric-row">
+              <span class="metric-name">Ask Quantity</span>
+              <span class="metric-val" id="putAskQtyVal">0.00 BTC</span>
+            </div>
+          </div>
+          <div style="font-size: 0.72rem; color: var(--text-muted); display: flex; justify-content: space-between;">
+            <span>Underlying: BTCUSDT</span>
+            <span id="putFreshnessVal">Quote Freshness: Live</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="pair-validation-banner" id="pairValidationBanner">
+        <span>Both Call and Put verified: Same underlying, same strike, same expiry, tradable with live ask/bid quotes.</span>
+        <span class="font-mono" id="estCombinedEntryVal">Est. Entry Premium: $0.00</span>
+      </div>
+    </section>
+
+    <!-- SECTION 4: STRATEGY CONFIGURATION AND EXECUTION -->
+    <section class="card">
+      <div class="card-header">
+        <div class="card-title">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+          BTC Short Straddle Configuration & Execution
+        </div>
+        <div style="display: flex; align-items: center; gap: 0.6rem;">
+          <span style="font-size: 0.75rem; color: var(--text-muted);">Trade Size:</span>
+          <input type="number" id="tradeSizeInput" value="0.01" step="0.01" min="0.01" style="background: var(--secondary-bg); border: 1px solid var(--border); padding: 0.25rem 0.5rem; border-radius: 6px; font-size: 0.78rem; font-weight: 600; font-family: 'JetBrains Mono', monospace; width: 80px;">
+          <span style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted);">BTC</span>
+        </div>
+      </div>
+
+      <div class="strategy-layout">
+        <!-- Level 1 Card -->
+        <div class="level-card">
+          <div class="level-header">
+            <div class="level-title">
+              <span class="badge badge-primary">LEVEL 1</span> Naked BTC Short Straddle
+            </div>
+            <p class="level-desc">
+              Sell selected ATM Call and Put options at market/ask. Pure execution without automated risk controls.
+            </p>
+          </div>
+          <div class="risk-rules">
+            <div class="rule-item">
+              <span class="rule-label">Order Type:</span>
+              <span class="rule-val">Sell Call + Sell Put (Market)</span>
+            </div>
+            <div class="rule-item">
+              <span class="rule-label">Risk Management:</span>
+              <span class="rule-val" style="color: var(--text-muted);">Automatic SL/TP Disabled</span>
+            </div>
+          </div>
+          <button class="btn btn-primary" id="btnExecLevel1" onclick="openConfirmationModal(1)">
+            Execute Level 1 (Naked Straddle)
+          </button>
+        </div>
+
+        <!-- Level 2 Card -->
+        <div class="level-card">
+          <div class="level-header">
+            <div class="level-title">
+              <span class="badge badge-success">LEVEL 2</span> Automated Risk-Managed Straddle
+            </div>
+            <p class="level-desc">
+              Sell both ATM options and continuously monitor combined buyback cost with automated exit orders.
+            </p>
+          </div>
+          <div class="risk-rules">
+            <div class="rule-item">
+              <span class="rule-label">Stop-Loss (+1%):</span>
+              <span class="rule-val" style="color: var(--danger);">Buyback >= Entry × 1.01</span>
+            </div>
+            <div class="rule-item">
+              <span class="rule-label">Take-Profit (-2%):</span>
+              <span class="rule-val" style="color: var(--success);">Buyback <= Entry × 0.98</span>
+            </div>
+          </div>
+          <button class="btn btn-success" id="btnExecLevel2" onclick="openConfirmationModal(2)">
+            Execute Level 2 (1% SL / 2% TP)
+          </button>
+        </div>
+      </div>
+
+      <!-- ACTIVE STRATEGY MONITOR -->
+      <div class="monitor-box" id="activeMonitorBox">
+        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); padding-bottom: 0.6rem;">
+          <div style="display: flex; align-items: center; gap: 0.6rem;">
+            <span style="font-size: 0.8rem; font-weight: 700; text-transform: uppercase; color: var(--text-muted);">Active Strategy Monitor</span>
+            <span class="badge badge-neutral" id="strategyStateBadge">IDLE</span>
+            <span class="badge badge-primary" id="strategyLevelBadge">LEVEL 2</span>
+          </div>
+          <button class="btn btn-danger" id="btnCloseAllBtn" onclick="stopStraddle()" style="padding: 0.35rem 0.75rem; font-size: 0.75rem;" disabled>
+            Close All Positions (Market Buyback)
+          </button>
+        </div>
+
+        <div class="monitor-stats-grid">
+          <div class="stat-box">
+            <div class="stat-label">Combined Entry Premium</div>
+            <div class="stat-value" id="combinedEntryVal">$0.00</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-label">Current Buyback Cost (Ask + Ask)</div>
+            <div class="stat-value" id="currentBuybackVal">$0.00</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-label">Unrealized PnL ($ / %)</div>
+            <div class="stat-value font-mono" id="unrealizedPnlVal">$0.00 (0.00%)</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-label" id="riskTargetLabel">1% SL / 2% TP Targets</div>
+            <div class="stat-value font-mono" id="riskTargetsVal" style="font-size: 0.85rem;">SL: $0.00 | TP: $0.00</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SECTION 5: ORDERS AND POSITIONS (TABS) -->
+    <section class="card">
       <div class="tabs-header">
-        <div class="tab-pills">
-          <button class="tab-btn active" onclick="switchTab('logs')">Execution Logs & 5s PnL Feed</button>
-          <button class="tab-btn" onclick="switchTab('history')">Trade History & Realized PnL</button>
-        </div>
-        <div class="tab-controls">
-          <button class="btn-mini" onclick="clearLogs()">Clear Logs</button>
-          <button class="btn-mini" onclick="refreshSession()">Refresh (5s Sync)</button>
-        </div>
+        <button class="tab-btn active" id="tabOrdersBtn" onclick="switchTab('orders')">Orders</button>
+        <button class="tab-btn" id="tabPositionsBtn" onclick="switchTab('positions')">Open Positions</button>
       </div>
 
-      <!-- Tab 1: Structured Execution Logs -->
-      <div id="tabLogs" class="terminal-container">
-        <!-- Rendered dynamically -->
-      </div>
-
-      <!-- Tab 2: Trade History Table -->
-      <div id="tabHistory" class="terminal-container" style="display:none;">
-        <table class="history-table">
+      <!-- Orders View -->
+      <div id="ordersView">
+        <table>
           <thead>
             <tr>
-              <th>ID</th>
-              <th>Level</th>
-              <th>Strike</th>
-              <th>Entry Premium</th>
-              <th>Exit Buyback</th>
-              <th>Realized PnL %</th>
-              <th>Realized PnL ($)</th>
-              <th>Exit Reason</th>
-              <th>Closed At</th>
+              <th>Time</th>
+              <th>Contract</th>
+              <th>Side</th>
+              <th>Quantity</th>
+              <th>Filled Qty</th>
+              <th>Avg Price</th>
+              <th>Status</th>
             </tr>
           </thead>
-          <tbody id="historyTableBody">
-            <!-- Rendered dynamically -->
+          <tbody id="ordersTableBody">
+            <tr>
+              <td colspan="7" style="text-align: center; color: var(--text-muted); padding: 1.5rem;">No orders submitted yet.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Positions View -->
+      <div id="positionsView" style="display: none;">
+        <table>
+          <thead>
+            <tr>
+              <th>Contract</th>
+              <th>Side</th>
+              <th>Quantity</th>
+              <th>Avg Entry</th>
+              <th>Current Price</th>
+              <th>Unrealized PnL</th>
+            </tr>
+          </thead>
+          <tbody id="positionsTableBody">
+            <tr>
+              <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 1.5rem;">No open positions confirmed on Bybit.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- SECTION 6: EXECUTION LOGS -->
+    <section class="card">
+      <div class="card-header">
+        <div class="card-title">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+          Strategy Execution Logs
+        </div>
+        <button class="btn-header" onclick="clearLogs()" style="padding: 0.25rem 0.6rem; font-size: 0.72rem;">
+          Clear Logs
+        </button>
+      </div>
+
+      <div class="log-feed-container">
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 100px;">Time</th>
+              <th style="width: 160px;">Event</th>
+              <th>Description</th>
+              <th style="width: 110px;">Status</th>
+            </tr>
+          </thead>
+          <tbody id="logsTableBody">
+            <tr>
+              <td colspan="4" style="text-align: center; color: var(--text-muted); padding: 1.5rem;">Awaiting strategy events...</td>
+            </tr>
           </tbody>
         </table>
       </div>
     </section>
   </main>
 
-  <!-- 10 Interview Q&A Modal -->
-  <div class="modal-overlay" id="qaModal">
-    <div class="modal-box">
+  <!-- PRE-FLIGHT CONFIRMATION MODAL -->
+  <div class="modal-overlay" id="confirmModal">
+    <div class="modal-card">
       <div class="modal-header">
-        <h3>Interview Technical Walkthrough • 10 Questions</h3>
-        <button class="modal-close" onclick="closeModal()">&times;</button>
+        <div class="modal-title" id="modalTitle">Confirm Strategy Execution</div>
+        <button onclick="closeConfirmationModal()" style="background: none; border: none; font-size: 1.2rem; cursor: pointer; color: var(--text-muted);">&times;</button>
       </div>
-      <div class="modal-body" id="qaBody">
-        <p style="color:var(--text-muted);">Loading walkthrough answers...</p>
+      <div class="modal-body">
+        <div class="modal-row">
+          <span class="modal-label">Execution Environment:</span>
+          <span class="modal-val" style="color: var(--primary);">Bybit Testnet</span>
+        </div>
+        <div class="modal-row">
+          <span class="modal-label">Strategy Level:</span>
+          <span class="modal-val" id="modalLevelVal">Level 2 (Risk Managed)</span>
+        </div>
+        <div class="modal-row">
+          <span class="modal-label">Selected Expiry:</span>
+          <span class="modal-val" id="modalExpiryVal">--</span>
+        </div>
+        <div class="modal-row">
+          <span class="modal-label">ATM Strike:</span>
+          <span class="modal-val" id="modalStrikeVal">$0</span>
+        </div>
+        <div class="modal-row">
+          <span class="modal-label">Call Contract (Sell Leg):</span>
+          <span class="modal-val" id="modalCallVal" style="font-size: 0.75rem;">--</span>
+        </div>
+        <div class="modal-row">
+          <span class="modal-label">Put Contract (Sell Leg):</span>
+          <span class="modal-val" id="modalPutVal" style="font-size: 0.75rem;">--</span>
+        </div>
+        <div class="modal-row">
+          <span class="modal-label">Order Quantity per Leg:</span>
+          <span class="modal-val" id="modalQtyVal">0.01 BTC</span>
+        </div>
+        <div class="modal-row">
+          <span class="modal-label">Estimated Entry Premium:</span>
+          <span class="modal-val" id="modalEstPremiumVal">$0.00</span>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" onclick="closeConfirmationModal()">Cancel</button>
+        <button class="btn btn-primary" id="btnConfirmSubmit" onclick="executeConfirmedStrategy()">Confirm Execution</button>
       </div>
     </div>
   </div>
 
+  <!-- Client-side Logic -->
   <script>
-    // State management
-    let activeTrade = null;
+    // State storage
+    let currentMarket = null;
+    let selectedStrike = null;
+    let selectedExpiryMs = null;
+    let pendingLevelToExecute = 2;
+    let isExecuting = false;
     let ws = null;
-    let autoScroll = true;
-    let selectedTradeSize = 0.01;
 
-    function setSize(sz) {
-      selectedTradeSize = sz;
-      document.querySelectorAll('.size-pill').forEach(p => p.classList.remove('active'));
-      const key = sz === 0.01 ? 'pill-001' : (sz === 0.02 ? 'pill-002' : (sz === 0.05 ? 'pill-005' : 'pill-010'));
-      const el = document.getElementById(key);
-      if (el) el.classList.add('active');
+    // Helper: format currency
+    function fmtUSD(val) {
+      if (val === undefined || val === null || isNaN(val)) return "$0.00";
+      return "$" + Number(val).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     }
 
-    // Connect WebSocket
-    function initWebSocket() {
-      const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      ws = new WebSocket(`${proto}//${window.location.host}/ws/stream`);
-
-      ws.onmessage = (e) => {
-        try {
-          const msg = JSON.parse(e.data);
-          handleLiveEvent(msg);
-        } catch (err) {
-          console.error('WS Parse Error:', err);
-        }
-      };
-
-      ws.onclose = () => {
-        setTimeout(initWebSocket, 2000);
-      };
+    // Helper: format strike
+    function fmtStrike(val) {
+      if (!val || isNaN(val)) return "$0";
+      return "$" + Number(val).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
     }
 
-    // On initial page load: fetch persistent session to guarantee zero data loss
-    async function refreshSession() {
+    // Initialize Dashboard
+    async function initDashboard() {
+      await testConnection();
+      await fetchMarketData();
+      await fetchSessionState();
+      await fetchOrders();
+      await fetchPositions();
+      connectWebSocket();
+
+      // Periodic refresh every 3 seconds for fresh live market quotes
+      setInterval(async () => {
+        await fetchMarketData(selectedExpiryMs, selectedStrike);
+        await fetchSessionState();
+        await fetchPositions();
+        await fetchOrders();
+      }, 3000);
+    }
+
+    // Test Connection
+    async function testConnection() {
+      const btn = document.getElementById("refreshConnBtn");
+      if (btn) btn.disabled = true;
       try {
-        const res = await fetch('/api/session');
+        const res = await fetch("/api/status");
+        if (res.ok) {
+          const data = await res.json();
+          document.getElementById("envBadge").innerHTML = `<span class="dot"></span> BYBIT ${data.environment || "TESTNET"}`;
+          document.getElementById("marketDataBadge").innerHTML = `<span class="dot"></span> PUBLIC MARKET DATA — ${data.market_data_connected ? "CONNECTED" : "DISCONNECTED"}`;
+          
+          const privateBadge = document.getElementById("privateApiBadge");
+          if (data.private_api_authenticated) {
+            privateBadge.className = "badge badge-success";
+            privateBadge.innerHTML = `<span class="dot"></span> PRIVATE API — AUTHENTICATED`;
+          } else {
+            privateBadge.className = "badge badge-warning";
+            privateBadge.innerHTML = `<span class="dot"></span> PRIVATE API — KEYS DETECTED`;
+          }
+
+          const engBadge = document.getElementById("engineBadge");
+          engBadge.className = data.nautilus_running ? "badge badge-primary" : "badge badge-neutral";
+          engBadge.innerHTML = `<span class="dot"></span> NAUTILUSTRADER — ${data.nautilus_running ? "RUNNING" : "STOPPED"}`;
+        }
+      } catch (err) {
+        console.error("Connection test failed:", err);
+      } finally {
+        if (btn) btn.disabled = false;
+      }
+    }
+
+    // Fetch Market Data
+    async function fetchMarketData(expiryMs = null, strike = null) {
+      try {
+        let url = "/api/market";
+        const params = [];
+        if (expiryMs) params.push(`expiry_ms=${expiryMs}`);
+        if (strike) params.push(`strike=${strike}`);
+        if (params.length > 0) url += "?" + params.join("&");
+
+        const res = await fetch(url);
+        if (!res.ok) return;
         const data = await res.json();
+        currentMarket = data;
+
+        // Populate header metrics
+        document.getElementById("btcPriceVal").innerText = fmtUSD(data.btc_price);
+        document.getElementById("targetExpiryVal").innerText = data.expiry_str;
+        document.getElementById("availableContractsVal").innerText = data.available_contracts_count || "48+";
+        document.getElementById("atmStrikeVal").innerText = fmtStrike(data.atm_strike);
+
+        // Expiry select dropdown
+        const expSelect = document.getElementById("expirySelect");
+        if (expSelect && data.available_expiries) {
+          const currentVal = expSelect.value;
+          expSelect.innerHTML = data.available_expiries.map(e => 
+            `<option value="${e.timestamp}" ${e.timestamp === data.expiry_ms ? 'selected' : ''}>${e.label}</option>`
+          ).join("");
+          selectedExpiryMs = data.expiry_ms;
+        }
+
+        // Render Strike Chips
+        renderStrikeChips(data);
+
+        // Render Selected Call and Put
+        renderOptionLegs(data);
+
+      } catch (err) {
+        console.error("Error fetching market:", err);
+      }
+    }
+
+    function renderStrikeChips(data) {
+      const container = document.getElementById("strikeChipsContainer");
+      if (!container || !data.strike_matrix) return;
+
+      container.innerHTML = data.strike_matrix.map(item => {
+        const isAtm = item.is_atm;
+        const isSel = item.is_selected || (selectedStrike ? item.strike === selectedStrike : isAtm);
+        const diffStr = item.diff > 0 ? `+${fmtUSD(item.diff)}` : fmtUSD(item.diff);
         
-        // Cumulative PnL in header
-        if (data.stats) {
-          const cumPnl = data.stats.cumulative_pnl_usd || 0;
-          const sign = cumPnl >= 0 ? '+' : '';
-          const el = document.getElementById('cumPnlText');
-          el.innerText = `${sign}$${cumPnl.toFixed(2)}`;
-          el.className = `value ${cumPnl >= 0 ? 'pnl-pos' : 'pnl-neg'}`;
-        }
-
-        // Render persistent logs
-        if (data.logs) {
-          renderLogs(data.logs);
-        }
-
-        // Render trade history
-        if (data.trade_history) {
-          renderHistory(data.trade_history);
-        }
-
-        // Active Trade rehydration
-        if (data.active_trade && data.active_trade.is_active) {
-          applyActiveTrade(data.active_trade);
-        } else {
-          resetTradeCard();
-        }
-
-        // Account balance & environment
-        if (data.environment) {
-          document.getElementById('engineEnv').innerText = `BYBIT ${data.environment}`;
-        }
-      } catch (err) {
-        console.error('Failed to load session:', err);
-      }
-    }
-
-    // Refresh live market strikes & index every 5s
-    async function refreshMarket() {
-      try {
-        const res = await fetch('/api/market');
-        const data = await res.json();
-        if (data.btc_price) {
-          document.getElementById('btcIndexHeader').innerText = `$${data.btc_price.toLocaleString('en-US', {minimumFractionDigits:2})}`;
-        }
-        if (data.expiry_str) {
-          document.getElementById('expiryLabel').innerText = `Target Expiry: ${data.expiry_str}`;
-        }
-        if (data.strike_matrix && data.strike_matrix.length > 0) {
-          renderStrikeMatrix(data.strike_matrix, data.atm_strike);
-        }
-      } catch (err) {
-        console.error('Failed to refresh market:', err);
-      }
-    }
-
-    async function refreshAccount() {
-      try {
-        const res = await fetch('/api/account');
-        const data = await res.json();
-        if (data.totalWalletBalance) {
-          const bal = parseFloat(data.totalWalletBalance).toLocaleString('en-US', {minimumFractionDigits:2});
-          document.getElementById('walletBalance').innerText = `$${bal} USDT`;
-        }
-      } catch (err) {}
-    }
-
-    // Render Strike Matrix
-    function renderStrikeMatrix(matrix, atmStrike) {
-      const container = document.getElementById('strikeMatrixRow');
-      container.innerHTML = '';
-      matrix.forEach(item => {
-        const chip = document.createElement('div');
-        chip.className = `strike-chip ${item.is_atm ? 'is-atm' : ''}`;
-        chip.innerHTML = `
-          <span class="strike-val">$${item.strike.toLocaleString()}</span>
-          <span class="strike-dist">Δ $${item.distance.toFixed(2)}</span>
-          ${item.is_atm ? '<span class="strike-badge">ATM Strike Selected</span>' : ''}
+        return `
+          <div class="strike-chip ${isAtm ? 'is-atm' : ''}" style="${isSel && !isAtm ? 'border-color: var(--primary); background: #F1F5F9;' : ''}" onclick="selectSpecificStrike(${item.strike})">
+            ${isAtm ? '<span class="atm-tag">ATM</span>' : ''}
+            <div>${fmtStrike(item.strike)}</div>
+            <div class="strike-chip-distance">${diffStr}</div>
+          </div>
         `;
-        container.appendChild(chip);
-      });
+      }).join("");
     }
 
-    // Render Logs
-    function renderLogs(logs) {
-      const container = document.getElementById('tabLogs');
-      container.innerHTML = '';
-      logs.forEach(log => appendLogRow(log, false));
-      if (autoScroll) container.scrollTop = container.scrollHeight;
+    function renderOptionLegs(data) {
+      if (!data.call_contract || !data.put_contract) return;
+      const call = data.call_contract;
+      const put = data.put_contract;
+
+      document.getElementById("callSymbolVal").innerText = call.symbol;
+      document.getElementById("callStrikeVal").innerText = fmtStrike(call.strike);
+      document.getElementById("callExpiryVal").innerText = call.expiry || data.expiry_str;
+      document.getElementById("callBidVal").innerText = fmtUSD(call.bid);
+      document.getElementById("callBidQtyVal").innerText = `${call.bid_qty || 1.0} BTC`;
+      document.getElementById("callAskVal").innerText = fmtUSD(call.ask);
+      document.getElementById("callAskQtyVal").innerText = `${call.ask_qty || 1.0} BTC`;
+
+      document.getElementById("putSymbolVal").innerText = put.symbol;
+      document.getElementById("putStrikeVal").innerText = fmtStrike(put.strike);
+      document.getElementById("putExpiryVal").innerText = put.expiry || data.expiry_str;
+      document.getElementById("putBidVal").innerText = fmtUSD(put.bid);
+      document.getElementById("putBidQtyVal").innerText = `${put.bid_qty || 1.0} BTC`;
+      document.getElementById("putAskVal").innerText = fmtUSD(put.ask);
+      document.getElementById("putAskQtyVal").innerText = `${put.ask_qty || 1.0} BTC`;
+
+      const banner = document.getElementById("pairValidationBanner");
+      const estEntry = (call.bid + put.bid) > 0 ? (call.bid + put.bid) : (call.ask + put.ask);
+      document.getElementById("estCombinedEntryVal").innerText = `Est. Entry Premium: ${fmtUSD(estEntry)}`;
+
+      if (data.pair_validated) {
+        banner.className = "pair-validation-banner";
+        banner.innerHTML = `
+          <span>Both Call and Put verified: Same underlying BTC, same strike (${fmtStrike(call.strike)}), same expiry (${data.expiry_str}), tradable on Bybit Testnet.</span>
+          <span class="font-mono">Est. Combined Entry: ${fmtUSD(estEntry)}</span>
+        `;
+      } else {
+        banner.className = "pair-validation-banner invalid";
+        banner.innerHTML = `<span>PAIR INVALID: Call and Put strike or expiry mismatch. Please select ATM.</span>`;
+      }
     }
 
-    function appendLogRow(log, scroll = true) {
-      const container = document.getElementById('tabLogs');
-      const row = document.createElement('div');
-      row.className = 'log-row';
-
-      let badgeClass = 'badge-info';
-      if (log.badge_type === 'success') badgeClass = 'badge-success';
-      if (log.badge_type === 'danger') badgeClass = 'badge-danger';
-      if (log.badge_type === 'warning') badgeClass = 'badge-warning';
-      if (log.badge_type === 'pnl-pos') badgeClass = 'badge-pnl-pos';
-      if (log.badge_type === 'pnl-neg') badgeClass = 'badge-pnl-neg';
-
-      let textClass = 'log-text';
-      if (log.badge_type === 'pnl-pos') textClass += ' highlight-pos';
-      if (log.badge_type === 'pnl-neg') textClass += ' highlight-neg';
-
-      row.innerHTML = `
-        <span class="log-time">[${log.time || ''}]</span>
-        <span class="log-badge ${badgeClass}">${log.category || 'INFO'}</span>
-        <span class="${textClass}">${log.message || ''}</span>
-      `;
-      container.appendChild(row);
-      if (scroll && autoScroll) container.scrollTop = container.scrollHeight;
+    function selectSpecificStrike(strike) {
+      selectedStrike = strike;
+      fetchMarketData(selectedExpiryMs, selectedStrike);
     }
 
-    // Render History
-    function renderHistory(history) {
-      const tbody = document.getElementById('historyTableBody');
-      tbody.innerHTML = '';
-      if (history.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="9" style="text-align:center; color:var(--text-muted); padding:1.5rem;">No completed trades yet.</td></tr>';
+    function onExpiryChanged() {
+      const expSelect = document.getElementById("expirySelect");
+      selectedExpiryMs = parseInt(expSelect.value);
+      selectedStrike = null;
+      fetchMarketData(selectedExpiryMs, null);
+    }
+
+    // Confirmation Modal
+    function openConfirmationModal(level) {
+      if (!currentMarket || !currentMarket.call_contract || !currentMarket.put_contract) {
+        alert("Market data still synchronizing. Please wait a moment.");
         return;
       }
-      history.slice().reverse().forEach(h => {
-        const tr = document.createElement('tr');
-        const pnlCls = h.pnl_usd >= 0 ? 'pnl-pos' : 'pnl-neg';
-        const sign = h.pnl_usd >= 0 ? '+' : '';
-        tr.innerHTML = `
-          <td style="color:#38bdf8;">${h.id}</td>
-          <td>Level ${h.level}</td>
-          <td>$${h.atm_strike.toLocaleString()}</td>
-          <td>$${h.combined_entry_premium.toFixed(2)}</td>
-          <td>$${h.exit_buyback_premium.toFixed(2)}</td>
-          <td class="${pnlCls}">${sign}${h.pnl_pct.toFixed(2)}%</td>
-          <td class="${pnlCls}">${sign}$${h.pnl_usd.toFixed(2)}</td>
-          <td style="color:var(--text-muted);">${h.exit_reason}</td>
-          <td style="color:var(--text-muted);">${h.closed_at}</td>
-        `;
-        tbody.appendChild(tr);
-      });
+      pendingLevelToExecute = level;
+      const qty = parseFloat(document.getElementById("tradeSizeInput").value) || 0.01;
+      const call = currentMarket.call_contract;
+      const put = currentMarket.put_contract;
+      const estEntry = (call.bid + put.bid) > 0 ? (call.bid + put.bid) : (call.ask + put.ask);
+
+      document.getElementById("modalLevelVal").innerText = level === 1 ? "Level 1 (Naked Straddle)" : "Level 2 (1% SL / 2% TP)";
+      document.getElementById("modalExpiryVal").innerText = currentMarket.expiry_str;
+      document.getElementById("modalStrikeVal").innerText = fmtStrike(call.strike);
+      document.getElementById("modalCallVal").innerText = call.symbol;
+      document.getElementById("modalPutVal").innerText = put.symbol;
+      document.getElementById("modalQtyVal").innerText = `${qty.toFixed(2)} BTC per leg`;
+      document.getElementById("modalEstPremiumVal").innerText = fmtUSD(estEntry);
+
+      document.getElementById("confirmModal").style.display = "flex";
     }
 
-    // Apply Active Trade State to UI
-    function applyActiveTrade(trade) {
-      activeTrade = trade;
-      document.getElementById('mainTerminalCard').classList.add('active-trade');
-      document.getElementById('stateText').innerText = `RUNNING [L${trade.level}]`;
-      document.getElementById('stateText').style.color = '#00f59b';
-
-      const sz = trade.trade_size || 0.01;
-      document.getElementById('openQtyBadge').innerHTML = `Open: <strong>${sz} BTC</strong> Short`;
-      document.getElementById('btnScaleIn').style.display = 'inline-flex';
-      document.getElementById('btnLevel1').disabled = false;
-      document.getElementById('btnLevel2').disabled = false;
-      document.getElementById('btnCloseAll').disabled = false;
-
-      // Leg symbols
-      if (trade.call_symbol) document.getElementById('callSymbolText').innerText = trade.call_symbol;
-      if (trade.put_symbol) document.getElementById('putSymbolText').innerText = trade.put_symbol;
-
-      // Entry fills
-      if (trade.call_entry_price) document.getElementById('callEntryText').innerText = `$${trade.call_entry_price.toFixed(2)}`;
-      if (trade.put_entry_price) document.getElementById('putEntryText').innerText = `$${trade.put_entry_price.toFixed(2)}`;
-      if (trade.combined_entry_premium) document.getElementById('combinedEntryText').innerText = `$${trade.combined_entry_premium.toFixed(2)}`;
-
-      // Live Asks
-      if (trade.call_ask) document.getElementById('callAskText').innerText = `$${trade.call_ask.toFixed(2)}`;
-      if (trade.put_ask) document.getElementById('putAskText').innerText = `$${trade.put_ask.toFixed(2)}`;
-      if (trade.call_bid) document.getElementById('callBidText').innerText = `$${trade.call_bid.toFixed(2)}`;
-      if (trade.put_bid) document.getElementById('putBidText').innerText = `$${trade.put_bid.toFixed(2)}`;
-
-      if (trade.current_buyback_premium) {
-        document.getElementById('buybackCostText').innerText = `$${trade.current_buyback_premium.toFixed(2)}`;
-      }
-
-      // Targets
-      if (trade.stop_loss_target) document.getElementById('slTargetVal').innerText = `$${trade.stop_loss_target.toFixed(2)}`;
-      if (trade.take_profit_target) document.getElementById('tpTargetVal').innerText = `$${trade.take_profit_target.toFixed(2)}`;
-
-      // PnL
-      updatePnlDisplay(trade.pnl_pct || 0, trade.pnl_usd || 0);
-
-      // Card active glows
-      document.getElementById('callCard').classList.add('is-open');
-      document.getElementById('putCard').classList.add('is-open');
-      document.getElementById('callStatusBadge').innerText = `SHORT ${sz} BTC (OPEN)`;
-      document.getElementById('putStatusBadge').innerText = `SHORT ${sz} BTC (OPEN)`;
+    function closeConfirmationModal() {
+      document.getElementById("confirmModal").style.display = "none";
     }
 
-    function resetTradeCard() {
-      activeTrade = null;
-      document.getElementById('mainTerminalCard').classList.remove('active-trade');
-      document.getElementById('stateText').innerText = 'IDLE';
-      document.getElementById('stateText').style.color = '#38bdf8';
+    // Execute Confirmed Strategy
+    async function executeConfirmedStrategy() {
+      const btn = document.getElementById("btnConfirmSubmit");
+      btn.disabled = true;
+      btn.innerText = "Submitting Orders...";
+      const qty = parseFloat(document.getElementById("tradeSizeInput").value) || 0.01;
 
-      document.getElementById('openQtyBadge').innerHTML = 'Open: <strong>0.00 BTC</strong>';
-      document.getElementById('btnScaleIn').style.display = 'none';
-      document.getElementById('btnLevel1').disabled = false;
-      document.getElementById('btnLevel2').disabled = false;
-      document.getElementById('btnCloseAll').disabled = true;
-
-      document.getElementById('callCard').classList.remove('is-open');
-      document.getElementById('putCard').classList.remove('is-open');
-      document.getElementById('callStatusBadge').innerText = 'READY TO SELL';
-      document.getElementById('putStatusBadge').innerText = 'READY TO SELL';
-
-      document.getElementById('pnlHeroText').innerText = '+0.00% ($0.00)';
-      document.getElementById('pnlHeroText').className = 'pnl-value pnl-neutral';
-      document.getElementById('riskDistanceText').innerText = 'Awaiting Execution';
-    }
-
-    function updatePnlDisplay(pnlPct, pnlUsd) {
-      const el = document.getElementById('pnlHeroText');
-      const sign = pnlPct >= 0 ? '+' : '';
-      el.innerText = `${sign}${pnlPct.toFixed(2)}% (${sign}$${pnlUsd.toFixed(2)})`;
-      el.className = `pnl-value ${pnlPct >= 0 ? 'pnl-pos' : 'pnl-neg'}`;
-
-      if (activeTrade && activeTrade.combined_entry_premium) {
-        const buyback = activeTrade.current_buyback_premium || activeTrade.combined_entry_premium;
-        const distSl = ((activeTrade.stop_loss_target - buyback) / activeTrade.combined_entry_premium) * 100.0;
-        const distTp = ((buyback - activeTrade.take_profit_target) / activeTrade.combined_entry_premium) * 100.0;
-        document.getElementById('riskDistanceText').innerText = `SL: ${distSl >= 0 ? '+' : ''}${distSl.toFixed(2)}% | TP: ${distTp >= 0 ? '+' : ''}${distTp.toFixed(2)}%`;
-      }
-    }
-
-    // Handle incoming WebSocket telemetry event
-    function handleLiveEvent(data) {
-      if (data.type === 'INITIALIZATION') {
-        document.getElementById('stateText').innerText = 'STARTING...';
-      } else if (data.type === 'STRADDLE_POSITION_ESTABLISHED') {
-        refreshSession();
-      } else if (data.type === 'VALUATION_UPDATE' || data.type === 'PNL_HEARTBEAT') {
-        if (data.call_ask) document.getElementById('callAskText').innerText = `$${data.call_ask.toFixed(2)}`;
-        if (data.put_ask) document.getElementById('putAskText').innerText = `$${data.put_ask.toFixed(2)}`;
-        if (data.call_bid) document.getElementById('callBidText').innerText = `$${data.call_bid.toFixed(2)}`;
-        if (data.put_bid) document.getElementById('putBidText').innerText = `$${data.put_bid.toFixed(2)}`;
-        if (data.current_buyback_premium) {
-          document.getElementById('buybackCostText').innerText = `$${data.current_buyback_premium.toFixed(2)}`;
-        }
-        if (data.pnl_pct !== undefined) {
-          updatePnlDisplay(data.pnl_pct, data.pnl_usd || 0);
-        }
-        if (data.type === 'PNL_HEARTBEAT') {
-          appendLogRow({
-            time: new Date().toLocaleTimeString(),
-            category: 'PNL',
-            badge_type: data.pnl_pct >= 0 ? 'pnl-pos' : 'pnl-neg',
-            message: data.message,
-          });
-        }
-      } else if (data.type === 'EXIT_TRIGGERED' || data.type === 'STRADDLE_CLOSED') {
-        refreshSession();
-        refreshAccount();
-      }
-    }
-
-    // Straddle controls
-    async function startStraddle(level) {
       try {
-        const res = await fetch('/api/straddle/start', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ level: level, trade_size: selectedTradeSize, simulated: false }),
+        const payload = {
+          level: pendingLevelToExecute,
+          trade_size: qty,
+          simulated: false,
+          target_expiry_ms: selectedExpiryMs,
+          target_strike: selectedStrike,
+        };
+
+        const res = await fetch("/api/straddle/start", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
         });
-        const d = await res.json();
-        if (!res.ok) throw new Error(d.detail || 'Failed to start');
-        refreshSession();
+
+        const data = await res.json();
+        if (res.ok) {
+          closeConfirmationModal();
+          await fetchSessionState();
+          await fetchOrders();
+          await fetchPositions();
+        } else {
+          alert(`Execution error: ${data.detail || "Failed to submit straddle orders."}`);
+        }
       } catch (err) {
-        alert(err.message);
+        alert(`Network error: ${err}`);
+      } finally {
+        btn.disabled = false;
+        btn.innerText = "Confirm Execution";
       }
     }
 
-    async function scaleIn() {
-      try {
-        const res = await fetch('/api/straddle/scale-in', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ trade_size: selectedTradeSize }),
-        });
-        const d = await res.json();
-        if (!res.ok) throw new Error(d.detail || 'Scale-in failed');
-        refreshSession();
-      } catch (err) {
-        alert(err.message);
-      }
-    }
-
+    // Stop / Flatten Strategy
     async function stopStraddle() {
+      const btn = document.getElementById("btnCloseAllBtn");
+      btn.disabled = true;
+      btn.innerText = "Closing...";
       try {
-        const res = await fetch('/api/straddle/stop', { method: 'POST' });
-        await res.json();
-        refreshSession();
+        const res = await fetch("/api/straddle/stop", { method: "POST" });
+        if (res.ok) {
+          await fetchSessionState();
+          await fetchOrders();
+          await fetchPositions();
+        }
       } catch (err) {
-        alert('Failed to stop straddle: ' + err.message);
+        console.error("Stop error:", err);
+      } finally {
+        btn.disabled = false;
+        btn.innerText = "Close All Positions (Market Buyback)";
       }
     }
 
-    async function triggerShock(type) {
+    // Session State Sync
+    async function fetchSessionState() {
       try {
-        const res = await fetch('/api/straddle/shock', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ shock_type: type }),
-        });
-        const d = await res.json();
-        if (!res.ok) throw new Error(d.detail || 'Shock failed');
-        refreshSession();
+        const res = await fetch("/api/session");
+        if (!res.ok) return;
+        const session = await res.json();
+
+        const isRunning = session.is_running;
+        const stateName = session.strategy_state || (isRunning ? "OPEN" : "IDLE");
+
+        const stateBadge = document.getElementById("strategyStateBadge");
+        stateBadge.innerText = stateName;
+        if (stateName === "OPEN" || stateName === "RUNNING") {
+          stateBadge.className = "badge badge-success";
+        } else if (stateName === "CLOSED") {
+          stateBadge.className = "badge badge-neutral";
+        } else if (stateName === "ENTRY_PENDING" || stateName === "EXIT_TRIGGERED") {
+          stateBadge.className = "badge badge-warning";
+        } else {
+          stateBadge.className = "badge badge-neutral";
+        }
+
+        const trade = session.active_trade;
+        const closeBtn = document.getElementById("btnCloseAllBtn");
+        const execL1 = document.getElementById("btnExecLevel1");
+        const execL2 = document.getElementById("btnExecLevel2");
+
+        if (isRunning && trade) {
+          closeBtn.disabled = false;
+          execL1.disabled = true;
+          execL2.disabled = true;
+
+          document.getElementById("strategyLevelBadge").innerText = `LEVEL ${trade.level || 2}`;
+          document.getElementById("combinedEntryVal").innerText = fmtUSD(trade.combined_entry_premium);
+          document.getElementById("currentBuybackVal").innerText = fmtUSD(trade.current_buyback_premium || trade.combined_entry_premium);
+
+          const pnlVal = document.getElementById("unrealizedPnlVal");
+          const pnlUsd = trade.pnl_usd || 0.0;
+          const pnlPct = trade.pnl_pct || 0.0;
+          const sign = pnlUsd >= 0 ? "+" : "";
+          pnlVal.innerText = `${sign}${fmtUSD(pnlUsd)} (${sign}${pnlPct.toFixed(2)}%)`;
+          pnlVal.style.color = pnlUsd >= 0 ? "var(--success)" : "var(--danger)";
+
+          if (trade.level === 1) {
+            document.getElementById("riskTargetsVal").innerText = "AUTOMATIC SL/TP DISABLED";
+            document.getElementById("riskTargetsVal").style.color = "var(--text-muted)";
+          } else {
+            const sl = trade.stop_loss_target || (trade.combined_entry_premium * 1.01);
+            const tp = trade.take_profit_target || (trade.combined_entry_premium * 0.98);
+            document.getElementById("riskTargetsVal").innerText = `SL: ${fmtUSD(sl)} | TP: ${fmtUSD(tp)}`;
+            document.getElementById("riskTargetsVal").style.color = "var(--text-main)";
+          }
+        } else {
+          closeBtn.disabled = true;
+          execL1.disabled = false;
+          execL2.disabled = false;
+          if (stateName === "IDLE" || stateName === "CLOSED") {
+            document.getElementById("combinedEntryVal").innerText = "$0.00";
+            document.getElementById("currentBuybackVal").innerText = "$0.00";
+            document.getElementById("unrealizedPnlVal").innerText = "$0.00 (0.00%)";
+            document.getElementById("unrealizedPnlVal").style.color = "var(--text-main)";
+            document.getElementById("riskTargetsVal").innerText = "SL: $0.00 | TP: $0.00";
+          }
+        }
+
+        // Render Logs
+        if (session.logs) {
+          renderLogs(session.logs);
+        }
       } catch (err) {
-        alert(err.message);
+        console.error("Session sync error:", err);
       }
+    }
+
+    // Orders Sync
+    async function fetchOrders() {
+      try {
+        const res = await fetch("/api/orders");
+        if (!res.ok) return;
+        const orders = await res.json();
+        const tbody = document.getElementById("ordersTableBody");
+        if (!tbody) return;
+
+        if (!orders || orders.length === 0) {
+          tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--text-muted); padding: 1.5rem;">No orders submitted yet.</td></tr>`;
+          return;
+        }
+
+        tbody.innerHTML = orders.slice().reverse().map(o => {
+          let badgeClass = "badge-neutral";
+          if (o.status === "FILLED") badgeClass = "badge-success";
+          else if (o.status === "ACCEPTED" || o.status === "NEW") badgeClass = "badge-primary";
+          else if (o.status === "CANCELLED" || o.status === "REJECTED") badgeClass = "badge-danger";
+
+          return `
+            <tr>
+              <td class="font-mono">${o.time || "--"}</td>
+              <td class="font-mono" style="font-weight: 600;">${o.contract}</td>
+              <td><span class="badge ${o.side === 'BUY' ? 'badge-primary' : 'badge-danger'}">${o.side}</span></td>
+              <td class="font-mono">${o.qty} BTC</td>
+              <td class="font-mono">${o.filled_qty} BTC</td>
+              <td class="font-mono">${fmtUSD(o.avg_price)}</td>
+              <td><span class="badge ${badgeClass}">${o.status}</span></td>
+            </tr>
+          `;
+        }).join("");
+      } catch (err) {
+        console.error("Orders fetch error:", err);
+      }
+    }
+
+    // Positions Sync
+    async function fetchPositions() {
+      try {
+        const res = await fetch("/api/positions");
+        if (!res.ok) return;
+        const positions = await res.json();
+        const tbody = document.getElementById("positionsTableBody");
+        if (!tbody) return;
+
+        if (!positions || positions.length === 0) {
+          tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--text-muted); padding: 1.5rem;">No open positions confirmed on Bybit.</td></tr>`;
+          return;
+        }
+
+        // Check if only 1 leg exists (unhedged exposure)
+        const hasCall = positions.some(p => p.symbol && p.symbol.includes("-C"));
+        const hasPut = positions.some(p => p.symbol && p.symbol.includes("-P"));
+        const isPartial = positions.length === 1 || (hasCall !== hasPut);
+
+        let warningRow = "";
+        if (isPartial) {
+          warningRow = `
+            <tr>
+              <td colspan="6" style="background: var(--warning-bg); color: var(--warning); font-weight: 600; text-align: center; padding: 0.5rem;">
+                ⚠️ PARTIAL STRADDLE — UNHEDGED EXPOSURE DETECTED
+              </td>
+            </tr>
+          `;
+        }
+
+        tbody.innerHTML = warningRow + positions.map(p => {
+          const pnl = parseFloat(p.unrealisedPnl || 0.0);
+          const pnlColor = pnl >= 0 ? "var(--success)" : "var(--danger)";
+          return `
+            <tr>
+              <td class="font-mono" style="font-weight: 600;">${p.symbol}</td>
+              <td><span class="badge badge-danger">${p.side || "Sell"}</span></td>
+              <td class="font-mono">${p.size} BTC</td>
+              <td class="font-mono">${fmtUSD(p.avgPrice)}</td>
+              <td class="font-mono">${fmtUSD(p.markPrice)}</td>
+              <td class="font-mono" style="color: ${pnlColor}; font-weight: 600;">${pnl >= 0 ? '+' : ''}${fmtUSD(pnl)}</td>
+            </tr>
+          `;
+        }).join("");
+      } catch (err) {
+        console.error("Positions fetch error:", err);
+      }
+    }
+
+    // Render Execution Logs
+    function renderLogs(logs) {
+      const tbody = document.getElementById("logsTableBody");
+      if (!tbody || !logs) return;
+
+      if (logs.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="4" style="text-align: center; color: var(--text-muted); padding: 1.5rem;">Awaiting strategy events...</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = logs.slice().reverse().map(l => {
+        let badgeClass = "badge-primary";
+        if (l.badge_type === "success" || l.category === "FILL") badgeClass = "badge-success";
+        else if (l.badge_type === "warning" || l.badge_type === "amber") badgeClass = "badge-warning";
+        else if (l.badge_type === "danger" || l.category === "RISK" || l.category === "ERROR") badgeClass = "badge-danger";
+
+        return `
+          <tr>
+            <td class="font-mono" style="color: var(--text-muted);">${l.time || "--"}</td>
+            <td><span class="badge ${badgeClass}">${l.category || "EVENT"}</span></td>
+            <td style="font-size: 0.82rem;">${l.message}</td>
+            <td><span class="badge ${badgeClass}">${l.badge_type ? l.badge_type.toUpperCase() : "INFO"}</span></td>
+          </tr>
+        `;
+      }).join("");
     }
 
     async function clearLogs() {
-      await fetch('/api/logs/clear', { method: 'POST' });
-      document.getElementById('tabLogs').innerHTML = '';
-    }
-
-    function switchTab(tab) {
-      const tabBtns = document.querySelectorAll('.tab-btn');
-      tabBtns.forEach(b => b.classList.remove('active'));
-      if (tab === 'logs') {
-        tabBtns[0].classList.add('active');
-        document.getElementById('tabLogs').style.display = 'flex';
-        document.getElementById('tabHistory').style.display = 'none';
-      } else {
-        tabBtns[1].classList.add('active');
-        document.getElementById('tabLogs').style.display = 'none';
-        document.getElementById('tabHistory').style.display = 'block';
+      try {
+        await fetch("/api/logs/clear", { method: "POST" });
+        await fetchSessionState();
+      } catch (err) {
+        console.error("Clear logs error:", err);
       }
     }
 
-    // Walkthrough modal
-    async function openModal() {
-      document.getElementById('qaModal').style.display = 'flex';
-      try {
-        const res = await fetch('/api/walkthrough');
-        const data = await res.json();
-        const body = document.getElementById('qaBody');
-        body.innerHTML = '';
-        data.questions.forEach(q => {
-          const div = document.createElement('div');
-          div.className = 'qa-card';
-          div.innerHTML = `
-            <div class="qa-q">Q${q.id}: ${q.question}</div>
-            <div class="qa-a">${q.details}</div>
-          `;
-          body.appendChild(div);
-        });
-      } catch (err) {}
-    }
-    function closeModal() {
-      document.getElementById('qaModal').style.display = 'none';
+    // Tab Switcher
+    function switchTab(tab) {
+      const ordersBtn = document.getElementById("tabOrdersBtn");
+      const posBtn = document.getElementById("tabPositionsBtn");
+      const ordersView = document.getElementById("ordersView");
+      const posView = document.getElementById("positionsView");
+
+      if (tab === "orders") {
+        ordersBtn.className = "tab-btn active";
+        posBtn.className = "tab-btn";
+        ordersView.style.display = "block";
+        posView.style.display = "none";
+      } else {
+        ordersBtn.className = "tab-btn";
+        posBtn.className = "tab-btn active";
+        ordersView.style.display = "none";
+        posView.style.display = "block";
+      }
     }
 
-    // Initial setup & 5-second interval loop
-    window.addEventListener('load', () => {
-      initWebSocket();
-      refreshSession();
-      refreshMarket();
-      refreshAccount();
+    // WebSocket Stream
+    function connectWebSocket() {
+      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      const wsUrl = `${protocol}//${window.location.host}/ws/stream`;
+      ws = new WebSocket(wsUrl);
 
-      // Refresh every 5 seconds as requested
-      setInterval(() => {
-        refreshMarket();
-        refreshAccount();
-        refreshSession();
-      }, 5000);
-    });
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type === "VALUATION_UPDATE" || msg.type === "ORDER_FILLED" || msg.type === "STRADDLE_CLOSED") {
+            fetchSessionState();
+            fetchPositions();
+            fetchOrders();
+          }
+        } catch (e) {}
+      };
+
+      ws.onclose = () => {
+        setTimeout(connectWebSocket, 3000);
+      };
+    }
+
+    // On Load
+    window.addEventListener("DOMContentLoaded", initDashboard);
   </script>
 </body>
 </html>

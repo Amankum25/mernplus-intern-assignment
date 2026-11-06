@@ -35,6 +35,7 @@ class StraddlePair:
     available_strikes: List[float] = field(default_factory=list)
     available_expiries: List[Dict[str, Any]] = field(default_factory=list)
     strike_matrix: List[Dict[str, Any]] = field(default_factory=list)
+    selected_strike: float = 0.0
 
 
 class BybitStrikeSelector:
@@ -144,6 +145,7 @@ class BybitStrikeSelector:
     def select_atm_straddle(
         self,
         target_expiry_ms: Optional[int] = None,
+        target_strike: Optional[float] = None,
         override_btc_price: Optional[float] = None,
     ) -> StraddlePair:
         """
@@ -154,6 +156,8 @@ class BybitStrikeSelector:
         ----------
         target_expiry_ms : int, optional
             The specific expiry timestamp (ms) to target. If None, picks the nearest future expiry.
+        target_strike : float, optional
+            A manually selected strike price if desired, otherwise defaults to the calculated ATM strike.
         override_btc_price : float, optional
             Use a manual reference price for testing.
         """
@@ -187,20 +191,21 @@ class BybitStrikeSelector:
 
         # Calculate nearest ATM strike to BTC reference price
         atm_strike = min(strikes, key=lambda s: abs(s - btc_price))
+        chosen_strike = target_strike if (target_strike is not None and target_strike in strikes) else atm_strike
 
-        # Find matching Call and Put for this ATM strike
+        # Find matching Call and Put for this strike
         call_contract = next(
-            (c for c in contracts_at_expiry if c.strike == atm_strike and c.option_type == "CALL"),
+            (c for c in contracts_at_expiry if c.strike == chosen_strike and c.option_type == "CALL"),
             None,
         )
         put_contract = next(
-            (c for c in contracts_at_expiry if c.strike == atm_strike and c.option_type == "PUT"),
+            (c for c in contracts_at_expiry if c.strike == chosen_strike and c.option_type == "PUT"),
             None,
         )
 
         if not call_contract or not put_contract:
             raise RuntimeError(
-                f"Could not find matching Call and Put for ATM strike {atm_strike} at expiry {expiry_map[chosen_expiry]}"
+                f"Could not find matching Call and Put for strike {chosen_strike} at expiry {expiry_map[chosen_expiry]}"
             )
 
         # Build detailed strike matrix for ATM visualization
@@ -217,6 +222,7 @@ class BybitStrikeSelector:
                     "distance": round(abs(s - btc_price), 2),
                     "diff": round(s - btc_price, 2),
                     "is_atm": s == atm_strike,
+                    "is_selected": s == chosen_strike,
                     "call_symbol": c_sym,
                     "put_symbol": p_sym,
                 }
@@ -232,5 +238,6 @@ class BybitStrikeSelector:
             available_strikes=strikes,
             available_expiries=available_expiries,
             strike_matrix=strike_matrix,
+            selected_strike=chosen_strike,
         )
 

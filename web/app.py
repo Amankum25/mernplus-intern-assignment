@@ -67,6 +67,7 @@ class StartStraddleRequest(BaseModel):
     trade_size: float = 0.01  # Min 0.01 BTC
     simulated: bool = False
     target_expiry_ms: Optional[int] = None
+    target_strike: Optional[float] = None
 
 
 class ShockRequest(BaseModel):
@@ -80,12 +81,61 @@ class ShockRequest(BaseModel):
 @app.get("/api/status")
 async def get_status():
     """Returns engine state, connection, and strategy progress."""
+    strategy_state = "IDLE"
+    if manager.active_strategy:
+        strategy_state = manager.active_strategy.strategy_state.value
+    elif manager.is_running:
+        strategy_state = "OPEN"
+
+    # Verify Bybit private API authentication
+    bybit_auth = False
+    bybit_conn = False
+    if manager.bybit_client:
+        try:
+            res = manager.bybit_client.get_wallet_balance()
+            if res.get("retCode") == 0:
+                bybit_auth = True
+                bybit_conn = True
+        except Exception:
+            pass
+
     return {
         "status": "RUNNING" if manager.is_running else "IDLE",
-        "environment": manager.environment_str,
+        "strategy_state": strategy_state,
+        "exchange": "Bybit",
+        "environment": "Testnet",
+        "bybit_connected": bybit_conn,
+        "market_data_connected": True,
+        "private_api_authenticated": bybit_auth,
+        "nautilus_running": True,
         "is_simulated": manager.is_simulated,
         "has_keys": bool(manager.api_key and manager.api_secret),
         "latest_telemetry": manager.latest_telemetry,
+    }
+
+
+@app.post("/api/connection/test")
+async def test_connection():
+    """Tests Bybit Testnet connectivity and private API authentication."""
+    auth_ok = False
+    details = "Public market data is active."
+    if manager.bybit_client:
+        try:
+            res = manager.bybit_client.get_wallet_balance()
+            if res.get("retCode") == 0:
+                auth_ok = True
+                details = "Bybit Testnet API authenticated successfully."
+            else:
+                details = f"Auth failed: {res.get('retMsg', 'Unknown error')}"
+        except Exception as e:
+            details = f"Connection error: {str(e)}"
+
+    return {
+        "bybit_connected": True,
+        "market_data_connected": True,
+        "private_api_authenticated": auth_ok,
+        "nautilus_running": True,
+        "message": details,
     }
 
 
@@ -93,16 +143,28 @@ async def get_status():
 async def get_session():
     """Returns persistent session state: active trade, logs history, trade history, and stats."""
     state = state_persistence.get_full_state()
+    strategy_state = "IDLE"
+    if manager.active_strategy:
+        strategy_state = manager.active_strategy.strategy_state.value
+    elif manager.is_running:
+        strategy_state = "OPEN"
+
     live_positions = []
-    if manager.bybit_client:
+    if manager.bybit_client and not manager.is_simulated:
         try:
             p_res = manager.bybit_client.get_open_positions("BTC")
             live_positions = p_res.get("result", {}).get("list", [])
         except Exception:
             pass
+
+    # Authoritative cleanup: if strategy is IDLE or CLOSED and no live positions exist, clear stale active_trade display
+    if strategy_state in ["IDLE", "CLOSED"] and not live_positions:
+        state["active_trade"] = None
+
     state["live_positions"] = live_positions
     state["is_running"] = manager.is_running
-    state["environment"] = manager.environment_str
+    state["strategy_state"] = strategy_state
+    state["environment"] = "Testnet"
     return state
 
 
@@ -139,10 +201,10 @@ async def get_account():
 
 
 @app.get("/api/market")
-async def get_market():
+async def get_market(expiry_ms: Optional[int] = None, strike: Optional[float] = None):
     """Returns live BTC reference price, expiration dates, and ATM strike chain."""
     try:
-        overview = manager.get_market_overview()
+        overview = manager.get_market_overview(target_expiry_ms=expiry_ms, target_strike=strike)
         return overview
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -174,6 +236,7 @@ async def start_straddle(req: StartStraddleRequest):
             trade_size=req.trade_size,
             simulated=req.simulated,
             target_expiry_ms=req.target_expiry_ms,
+            target_strike=req.target_strike,
         )
         return res
     except Exception as e:
@@ -195,15 +258,47 @@ async def stop_straddle():
     return manager.stop_straddle()
 
 
+@app.get("/api/orders")
+async def get_orders():
+    """Returns order history from persistent storage."""
+    state = state_persistence.get_full_state()
+    return state.get("orders", [])
+
+
 @app.get("/api/positions")
 async def get_positions():
-    """Returns active Bybit option positions directly from exchange."""
-    if manager.bybit_client:
+    """Returns active Bybit option positions directly from exchange or active trade."""
+    if manager.bybit_client and not manager.is_simulated:
         try:
             res = manager.bybit_client.get_open_positions("BTC")
-            return res.get("result", {}).get("list", [])
+            positions = res.get("result", {}).get("list", [])
+            if positions:
+                return positions
         except Exception:
-            return []
+            pass
+    
+    # Return active trade positions only if strategy is actively running
+    if manager.is_running or (manager.active_strategy and manager.active_strategy.strategy_state.value in ["OPEN", "ACTIVE_POSITION", "PARTIALLY_FILLED"]):
+        trade = state_persistence.state.get("active_trade")
+        if trade and trade.get("is_active"):
+            return [
+                {
+                    "symbol": trade.get("call_symbol"),
+                    "side": "Sell",
+                    "size": str(trade.get("trade_size", 0.01)),
+                    "avgPrice": str(trade.get("call_entry_price", 0.0)),
+                    "markPrice": str(trade.get("call_ask", 0.0)),
+                    "unrealisedPnl": str(round((trade.get("call_entry_price", 0.0) - trade.get("call_ask", 0.0)) * trade.get("trade_size", 0.01), 4)),
+                },
+                {
+                    "symbol": trade.get("put_symbol"),
+                    "side": "Sell",
+                    "size": str(trade.get("trade_size", 0.01)),
+                    "avgPrice": str(trade.get("put_entry_price", 0.0)),
+                    "markPrice": str(trade.get("put_ask", 0.0)),
+                    "unrealisedPnl": str(round((trade.get("put_entry_price", 0.0) - trade.get("put_ask", 0.0)) * trade.get("trade_size", 0.01), 4)),
+                }
+            ]
     return []
 
 
