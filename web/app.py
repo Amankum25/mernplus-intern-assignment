@@ -83,7 +83,8 @@ async def get_status():
     """Returns engine state, connection, and strategy progress."""
     strategy_state = "IDLE"
     if manager.active_strategy:
-        strategy_state = manager.active_strategy.strategy_state.value
+        st = manager.active_strategy.strategy_state
+        strategy_state = st.value if hasattr(st, "value") else str(st)
     elif manager.is_running:
         strategy_state = "OPEN"
 
@@ -145,7 +146,8 @@ async def get_session():
     state = state_persistence.get_full_state()
     strategy_state = "IDLE"
     if manager.active_strategy:
-        strategy_state = manager.active_strategy.strategy_state.value
+        st = manager.active_strategy.strategy_state
+        strategy_state = st.value if hasattr(st, "value") else str(st)
     elif manager.is_running:
         strategy_state = "OPEN"
 
@@ -278,7 +280,11 @@ async def get_positions():
             pass
     
     # Return active trade positions only if strategy is actively running
-    if manager.is_running or (manager.active_strategy and manager.active_strategy.strategy_state.value in ["OPEN", "ACTIVE_POSITION", "PARTIALLY_FILLED"]):
+    st_val = ""
+    if manager.active_strategy:
+        st = manager.active_strategy.strategy_state
+        st_val = st.value if hasattr(st, "value") else str(st)
+    if manager.is_running or (st_val in ["OPEN", "ACTIVE_POSITION", "PARTIALLY_FILLED"]):
         trade = state_persistence.state.get("active_trade")
         if trade and trade.get("is_active"):
             return [
