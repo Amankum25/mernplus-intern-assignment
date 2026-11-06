@@ -436,6 +436,25 @@
     .rule-label { color: var(--text-muted); }
     .rule-val { font-weight: 600; }
 
+    .qty-preset-btn {
+      background: #FFFFFF;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 0.18rem 0.45rem;
+      font-size: 0.68rem;
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 600;
+      cursor: pointer;
+      color: var(--text-muted);
+      transition: all 0.12s ease;
+    }
+
+    .qty-preset-btn:hover, .qty-preset-btn.active {
+      border-color: var(--primary);
+      color: var(--primary);
+      background: var(--primary-light);
+    }
+
     .btn {
       padding: 0.5rem 0.85rem;
       border-radius: 5px;
@@ -855,10 +874,31 @@
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
           BTC Short Straddle Configuration & Execution
         </div>
-        <div style="display: flex; align-items: center; gap: 0.5rem;">
-          <span style="font-size: 0.72rem; color: var(--text-muted);">Trade Size:</span>
-          <input type="number" id="tradeSizeInput" value="0.01" step="0.01" min="0.01" style="background: var(--secondary-bg); border: 1px solid var(--border); padding: 0.2rem 0.45rem; border-radius: 5px; font-size: 0.76rem; font-weight: 600; font-family: 'JetBrains Mono', monospace; width: 75px;">
-          <span style="font-size: 0.72rem; font-weight: 600; color: var(--text-muted);">BTC per leg</span>
+      </div>
+
+      <!-- DEDICATED ORDER QUANTITY CONTROL STRIP -->
+      <div style="background: var(--secondary-bg); border: 1px solid var(--border); border-radius: 7px; padding: 0.55rem 0.85rem; margin-bottom: 0.75rem; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.65rem;">
+        <div style="display: flex; align-items: center; gap: 0.65rem; flex-wrap: wrap;">
+          <div style="font-size: 0.76rem; font-weight: 700; color: var(--text-main); display: flex; align-items: center; gap: 0.35rem;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+            Order Quantity:
+          </div>
+          <div style="display: flex; align-items: center; gap: 0.35rem;">
+            <input type="number" id="tradeSizeInput" value="0.01" step="0.01" min="0.01" max="10.0" oninput="onQuantityChanged(this.value)"
+              style="background: #FFFFFF; border: 1.5px solid var(--border); padding: 0.25rem 0.5rem; border-radius: 5px; font-size: 0.82rem; font-weight: 700; font-family: 'JetBrains Mono', monospace; width: 85px; color: var(--text-main); text-align: center;">
+            <span style="font-size: 0.74rem; font-weight: 700; color: var(--primary);">BTC per leg</span>
+          </div>
+          <div style="display: flex; gap: 0.3rem;">
+            <button type="button" class="qty-preset-btn active" onclick="setQuantityPreset(0.01)">0.01</button>
+            <button type="button" class="qty-preset-btn" onclick="setQuantityPreset(0.02)">0.02</button>
+            <button type="button" class="qty-preset-btn" onclick="setQuantityPreset(0.05)">0.05</button>
+            <button type="button" class="qty-preset-btn" onclick="setQuantityPreset(0.10)">0.10</button>
+          </div>
+        </div>
+        <div style="font-size: 0.74rem; color: var(--text-muted); display: flex; align-items: center; gap: 0.45rem;">
+          <span>Est. Total Premium:</span>
+          <span class="font-mono" id="estTotalPremiumVal" style="font-weight: 700; color: var(--text-main);">$0.00 USD</span>
+          <span style="font-size: 0.68rem; color: var(--text-muted);">(Total 2 Legs)</span>
         </div>
       </div>
 
@@ -1313,6 +1353,9 @@
       const estEntry = (call.bid + put.bid) > 0 ? (call.bid + put.bid) : (call.ask + put.ask);
       document.getElementById("estCombinedEntryVal").innerText = `Est. Entry Premium: ${fmtUSD(estEntry)}`;
 
+      const currentQty = parseFloat(document.getElementById("tradeSizeInput").value) || 0.01;
+      onQuantityChanged(currentQty);
+
       if (data.pair_validated) {
         banner.className = "pair-validation-banner";
         banner.innerHTML = `
@@ -1322,6 +1365,34 @@
       } else {
         banner.className = "pair-validation-banner invalid";
         banner.innerHTML = `<span>PAIR INVALID: Call and Put strike or expiry mismatch. Please select ATM.</span>`;
+      }
+    }
+
+    function setQuantityPreset(qty) {
+      const input = document.getElementById("tradeSizeInput");
+      if (input) {
+        input.value = qty;
+        onQuantityChanged(qty);
+      }
+      document.querySelectorAll(".qty-preset-btn").forEach(btn => {
+        if (parseFloat(btn.innerText) === qty) {
+          btn.classList.add("active");
+        } else {
+          btn.classList.remove("active");
+        }
+      });
+    }
+
+    function onQuantityChanged(val) {
+      const qty = parseFloat(val) || 0.01;
+      if (!currentMarket || !currentMarket.call_contract || !currentMarket.put_contract) return;
+      const call = currentMarket.call_contract;
+      const put = currentMarket.put_contract;
+      const estPerUnit = (call.bid + put.bid) > 0 ? (call.bid + put.bid) : (call.ask + put.ask);
+      const estTotal = estPerUnit * qty;
+      const totalSpan = document.getElementById("estTotalPremiumVal");
+      if (totalSpan) {
+        totalSpan.innerText = fmtUSD(estTotal);
       }
     }
 
