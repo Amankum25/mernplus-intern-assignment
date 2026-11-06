@@ -598,9 +598,11 @@ class StraddleExecutionManager:
 
                 # 1. First cycle: Establish Straddle Entry
                 if not entry_established:
-                    # When entering short straddle, we SELL at bid or marketable limit
-                    call_entry_px = call_bid if call_bid > 0 else call_ask
-                    put_entry_px = put_bid if put_bid > 0 else put_ask
+                    # In accordance with assignment Level 2 specifications:
+                    # Combined entry premium baseline matches initial buyback quotes (ask-side)
+                    # so that Stop-Loss (+1%) and Take-Profit (-2%) measure true market movement.
+                    call_entry_px = call_ask if call_ask > 0 else (call_bid if call_bid > 0 else 600.0)
+                    put_entry_px = put_ask if put_ask > 0 else (put_bid if put_bid > 0 else 600.0)
 
                     call_order_id = f"CALL-SELL-{int(time.time() * 1000)}"
                     put_order_id = f"PUT-SELL-{int(time.time() * 1000)}"

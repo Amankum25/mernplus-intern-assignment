@@ -883,7 +883,7 @@
               <span class="rule-val" style="color: var(--text-muted);">Automatic SL/TP Disabled</span>
             </div>
           </div>
-          <button class="btn btn-primary" id="btnExecLevel1" onclick="openConfirmationModal(1)">
+          <button class="btn btn-primary" id="btnExecLevel1" onclick="executeStrategy(1)">
             Execute Level 1 (Naked Straddle)
           </button>
         </div>
@@ -908,7 +908,7 @@
               <span class="rule-val" style="color: var(--success);">Buyback <= Entry × 0.98</span>
             </div>
           </div>
-          <button class="btn btn-success" id="btnExecLevel2" onclick="openConfirmationModal(2)">
+          <button class="btn btn-success" id="btnExecLevel2" onclick="executeStrategy(2)">
             Execute Level 2 (1% SL / 2% TP)
           </button>
         </div>
@@ -1335,42 +1335,17 @@
       fetchMarketData(selectedExpiryMs, null);
     }
 
-    function openConfirmationModal(level) {
-      if (!currentMarket || !currentMarket.call_contract || !currentMarket.put_contract) {
-        alert("Synchronizing option chain from Bybit. Please retry in a second.");
-        return;
-      }
-      pendingLevelToExecute = level;
-      const qty = parseFloat(document.getElementById("tradeSizeInput").value) || 0.01;
-      const call = currentMarket.call_contract;
-      const put = currentMarket.put_contract;
-      const estEntry = (call.bid + put.bid) > 0 ? (call.bid + put.bid) : (call.ask + put.ask);
-
-      document.getElementById("modalTitle").innerText = hasActivePositions ? "Add Straddle Position (Scale-in)" : "Confirm Strategy Execution";
-      document.getElementById("modalLevelVal").innerText = level === 1 ? "Level 1 (Naked Straddle)" : "Level 2 (1% SL / 2% TP)";
-      document.getElementById("modalExpiryVal").innerText = currentMarket.expiry_str;
-      document.getElementById("modalStrikeVal").innerText = fmtStrike(call.strike);
-      document.getElementById("modalCallVal").innerText = call.symbol;
-      document.getElementById("modalPutVal").innerText = put.symbol;
-      document.getElementById("modalQtyVal").innerText = `${qty.toFixed(2)} BTC per leg`;
-      document.getElementById("modalEstPremiumVal").innerText = fmtUSD(estEntry);
-
-      document.getElementById("confirmModal").style.display = "flex";
-    }
-
-    function closeConfirmationModal() {
-      document.getElementById("confirmModal").style.display = "none";
-    }
-
-    async function executeConfirmedStrategy() {
-      const btn = document.getElementById("btnConfirmSubmit");
+    async function executeStrategy(level) {
+      const btn = level === 1 ? document.getElementById("btnExecLevel1") : document.getElementById("btnExecLevel2");
+      const originalText = btn.innerText;
       btn.disabled = true;
       btn.innerText = "Placing Orders...";
+
       const qty = parseFloat(document.getElementById("tradeSizeInput").value) || 0.01;
 
       try {
         const payload = {
-          level: pendingLevelToExecute,
+          level: level,
           trade_size: qty,
           simulated: false,
           target_expiry_ms: selectedExpiryMs,
@@ -1385,8 +1360,7 @@
 
         const data = await res.json();
         if (res.ok) {
-          closeConfirmationModal();
-          syncAllState();
+          await syncAllState();
         } else {
           alert(`Execution error: ${data.detail || "Failed to submit straddle orders."}`);
         }
@@ -1394,7 +1368,7 @@
         alert(`Network error: ${err}`);
       } finally {
         btn.disabled = false;
-        btn.innerText = "Confirm Execution";
+        btn.innerText = originalText;
       }
     }
 
