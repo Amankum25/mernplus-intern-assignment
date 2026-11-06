@@ -97,6 +97,7 @@ class StraddleExecutionManager:
         self.is_running: bool = False
         self.is_simulated: bool = False
         self.current_trade_size: float = 0.01
+        self.auto_exit_on_market: bool = False  # Demo Hold Mode: prevents premature closing from testnet noise
 
         # Live telemetry feed
         self.telemetry_listeners: List[Callable[[Dict[str, Any]], None]] = []
@@ -858,11 +859,10 @@ class StraddleExecutionManager:
                         )
 
                     # Check Level 2 Automated Risk Management
-                    # To prevent premature whipsaws caused by single-tick testnet orderbook noise or micro-jitter,
-                    # we require a 20-second stabilization window after entry, plus 3 consecutive confirmation ticks.
-                    # Price shock demo triggers (simulate_price_shock) bypass this and execute immediately.
+                    # In Demo Hold Mode (default), position remains open with live PnL updates so you can demonstrate the strategy.
+                    # Automated exit triggers immediately when Interviewer Demo Panel shocks are triggered, or when auto_exit_on_market is enabled.
                     time_in_trade = now_ts - entry_ts
-                    if level == 2 and not self.active_strategy.exit_triggered:
+                    if level == 2 and not self.active_strategy.exit_triggered and self.auto_exit_on_market:
                         # Stop-Loss: buyback premium increased by >= 1%
                         if combined_buyback >= self.active_strategy.stop_loss_target_premium:
                             sl_breach_count += 1

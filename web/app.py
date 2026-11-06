@@ -74,6 +74,10 @@ class ShockRequest(BaseModel):
     shock_type: str  # "STOP_LOSS" or "TAKE_PROFIT"
 
 
+class AutoExitRequest(BaseModel):
+    enabled: bool
+
+
 # -------------------------------------------------------------------------
 # REST Endpoints
 # -------------------------------------------------------------------------
@@ -177,6 +181,7 @@ def get_session():
     state["is_running"] = manager.is_running
     state["strategy_state"] = strategy_state
     state["environment"] = "Testnet"
+    state["auto_exit_on_market"] = manager.auto_exit_on_market
     return state
 
 
@@ -325,6 +330,13 @@ def simulate_shock(req: ShockRequest):
         return manager.simulate_price_shock(req.shock_type)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/straddle/auto-exit-mode")
+def set_auto_exit_mode(req: AutoExitRequest):
+    """Toggles automated exit on live market noise vs on-demand interviewer shock demo."""
+    manager.auto_exit_on_market = req.enabled
+    return {"status": "SUCCESS", "auto_exit_on_market": manager.auto_exit_on_market}
 
 
 @app.get("/api/walkthrough")

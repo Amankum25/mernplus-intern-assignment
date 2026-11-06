@@ -948,16 +948,25 @@
 
         <!-- SIMULATE LEVEL 2 RISK DEMO CONTROLS -->
         <div class="demo-shock-bar">
-          <span style="font-size: 0.72rem; font-weight: 700; color: #B45309; display: flex; align-items: center; gap: 0.3rem;">
-            ⚡ Interviewer Demo Panel (Simulate Level 2 Automated Exits):
-          </span>
-          <div style="display: flex; gap: 0.45rem;">
-            <button class="btn-shock btn-shock-sl" onclick="simulateShock('STOP_LOSS')" title="Simulates a +1.5% ask price surge to trigger automated Stop-Loss exit">
-              ⚡ Trigger +1.5% SL Shock
-            </button>
-            <button class="btn-shock btn-shock-tp" onclick="simulateShock('TAKE_PROFIT')" title="Simulates a -2.5% ask price drop to trigger automated Take-Profit exit">
-              🎯 Trigger -2.5% TP Shock
-            </button>
+          <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem; width: 100%;">
+            <div style="display: flex; align-items: center; gap: 0.65rem;">
+              <span style="font-size: 0.72rem; font-weight: 700; color: #B45309; display: flex; align-items: center; gap: 0.3rem;">
+                ⚡ Level 2 Risk Actions:
+              </span>
+              <label style="font-size: 0.72rem; font-weight: 600; color: var(--text-main); display: flex; align-items: center; gap: 0.35rem; cursor: pointer;">
+                <input type="checkbox" id="chkAutoExitMarket" onchange="toggleAutoExitMarket(this.checked)" style="cursor: pointer;">
+                Auto-Exit on Live Market Noise
+              </label>
+              <span style="font-size: 0.66rem; color: var(--text-muted);">(Default: OFF for stable demo; use shock buttons to trigger exits)</span>
+            </div>
+            <div style="display: flex; gap: 0.45rem;">
+              <button class="btn-shock btn-shock-sl" onclick="simulateShock('STOP_LOSS')" title="Simulates a +1.5% ask price surge to trigger automated Stop-Loss exit">
+                ⚡ Trigger +1.5% SL Shock
+              </button>
+              <button class="btn-shock btn-shock-tp" onclick="simulateShock('TAKE_PROFIT')" title="Simulates a -2.5% ask price drop to trigger automated Take-Profit exit">
+                🎯 Trigger -2.5% TP Shock
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -1407,6 +1416,18 @@
       }
     }
 
+    async function toggleAutoExitMarket(enabled) {
+      try {
+        await fetch("/api/straddle/auto-exit-mode", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ enabled: Boolean(enabled) }),
+        });
+      } catch (e) {
+        console.error("Failed to update auto-exit mode:", e);
+      }
+    }
+
     async function fetchSessionState() {
       try {
         const res = await fetch("/api/session");
@@ -1426,6 +1447,13 @@
           stateBadge.className = "badge badge-warning";
         } else {
           stateBadge.className = "badge badge-neutral";
+        }
+
+        if (session.auto_exit_on_market !== undefined) {
+          const chk = document.getElementById("chkAutoExitMarket");
+          if (chk && document.activeElement !== chk) {
+            chk.checked = Boolean(session.auto_exit_on_market);
+          }
         }
 
         const trade = session.active_trade;
