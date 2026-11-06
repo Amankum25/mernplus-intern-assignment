@@ -5,6 +5,7 @@ and determines the nearest At-The-Money (ATM) strike to pair Call and Put option
 """
 
 import datetime
+import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 import requests
@@ -46,20 +47,30 @@ class BybitStrikeSelector:
 
     def __init__(self, base_url: str = "https://api.bybit.com"):
         self.base_url = base_url.rstrip("/")
+        self._cached_contracts: List[OptionContractInfo] = []
+        self._cached_contracts_ts: float = 0.0
+        self._cached_price: float = 0.0
+        self._cached_price_ts: float = 0.0
 
     def get_btc_reference_price(self) -> float:
         """
         Fetch the current BTC underlying reference price from Bybit.
         Uses BTCUSDT linear ticker last/index price or option index price.
         """
+        now = time.time()
+        if self._cached_price > 0 and (now - self._cached_price_ts) < 2.0:
+            return self._cached_price
+
         try:
             # Query linear perpetual for live BTC reference price
             url = f"{self.base_url}/v5/market/tickers?category=linear&symbol=BTCUSDT"
-            res = requests.get(url, timeout=10).json()
+            res = requests.get(url, timeout=5).json()
             if res.get("retCode") == 0 and res.get("result", {}).get("list"):
                 ticker = res["result"]["list"][0]
                 price = float(ticker.get("lastPrice") or ticker.get("indexPrice") or ticker.get("markPrice"))
                 if price > 0:
+                    self._cached_price = price
+                    self._cached_price_ts = now
                     return price
         except Exception as e:
             print(f"[StrikeSelector] Failed to fetch linear BTCUSDT price: {e}")
@@ -67,80 +78,96 @@ class BybitStrikeSelector:
         # Fallback to option tickers
         try:
             url = f"{self.base_url}/v5/market/tickers?category=option&baseCoin=BTC"
-            res = requests.get(url, timeout=10).json()
+            res = requests.get(url, timeout=5).json()
             if res.get("retCode") == 0 and res.get("result", {}).get("list"):
                 for t in res["result"]["list"]:
                     ref = float(t.get("underlyingPrice") or t.get("indexPrice") or 0)
                     if ref > 0:
+                        self._cached_price = ref
+                        self._cached_price_ts = now
                         return ref
         except Exception as e:
             print(f"[StrikeSelector] Failed to fetch option tickers: {e}")
 
         # If offline or rate limited, return fallback
-        return 75000.0
+        return self._cached_price if self._cached_price > 0 else 75000.0
 
     def get_all_option_contracts(self) -> List[OptionContractInfo]:
         """
         Fetch all active BTC option contracts from Bybit instruments-info endpoint.
+        Uses in-memory caching to prevent API rate limits and optimize response times.
         """
+        now = time.time()
+        if self._cached_contracts and (now - self._cached_contracts_ts) < 30.0:
+            return self._cached_contracts
+
         url = f"{self.base_url}/v5/market/instruments-info?category=option&baseCoin=BTC&limit=1000"
-        res = requests.get(url, timeout=15).json()
-        if res.get("retCode") != 0 or not res.get("result", {}).get("list"):
-            raise RuntimeError(f"Bybit API error: {res.get('retMsg', 'Unknown error')}")
+        try:
+            res = requests.get(url, timeout=5).json()
+            if res.get("retCode") != 0 or not res.get("result", {}).get("list"):
+                if self._cached_contracts:
+                    return self._cached_contracts
+                raise RuntimeError(f"Bybit API error: {res.get('retMsg', 'Unknown error')}")
 
-        now_ms = int(datetime.datetime.now(datetime.timezone.utc).timestamp() * 1000)
-        contracts: List[OptionContractInfo] = []
+            now_ms = int(datetime.datetime.now(datetime.timezone.utc).timestamp() * 1000)
+            contracts: List[OptionContractInfo] = []
 
-        for item in res["result"]["list"]:
-            delivery_time_ms = int(item.get("deliveryTime", 0))
-            # Ignore expired contracts
-            if delivery_time_ms <= now_ms:
-                continue
+            for item in res["result"]["list"]:
+                delivery_time_ms = int(item.get("deliveryTime", 0))
+                # Ignore expired contracts
+                if delivery_time_ms <= now_ms:
+                    continue
 
-            raw_symbol = item["symbol"]  # e.g., BTC-7NOV26-75750-C-USDT
-            options_type = item.get("optionsType", "").upper()  # "CALL" or "PUT"
-            if not options_type:
-                options_type = "CALL" if "-C" in raw_symbol else "PUT"
+                raw_symbol = item["symbol"]  # e.g., BTC-7NOV26-75750-C-USDT
+                options_type = item.get("optionsType", "").upper()  # "CALL" or "PUT"
+                if not options_type:
+                    options_type = "CALL" if "-C" in raw_symbol else "PUT"
 
-            # Parse strike price
-            # Symbols format: BTC-{DATE}-{STRIKE}-{TYPE}-{CURRENCY} or BTC-{DATE}-{STRIKE}-{TYPE}
-            parts = raw_symbol.split("-")
-            strike = 0.0
-            if len(parts) >= 3:
-                try:
-                    strike = float(parts[2])
-                except ValueError:
+                # Parse strike price
+                parts = raw_symbol.split("-")
+                strike = 0.0
+                if len(parts) >= 3:
+                    try:
+                        strike = float(parts[2])
+                    except ValueError:
+                        strike = float(item.get("strikePrice", 0))
+                else:
                     strike = float(item.get("strikePrice", 0))
-            else:
-                strike = float(item.get("strikePrice", 0))
 
-            if strike <= 0:
-                continue
+                if strike <= 0:
+                    continue
 
-            # Nautilus instrument ID format: BTC-7NOV26-75750-C-USDT-OPTION.BYBIT
-            # If raw_symbol ends with USDT, Nautilus appends -OPTION.BYBIT
-            instrument_id = f"{raw_symbol}-OPTION.BYBIT"
+                instrument_id = f"{raw_symbol}-OPTION.BYBIT"
+                exp_dt = datetime.datetime.fromtimestamp(delivery_time_ms / 1000, datetime.timezone.utc)
+                expiry_str = exp_dt.strftime("%Y-%m-%d %H:%M UTC")
 
-            exp_dt = datetime.datetime.fromtimestamp(delivery_time_ms / 1000, datetime.timezone.utc)
-            expiry_str = exp_dt.strftime("%Y-%m-%d %H:%M UTC")
+                min_order_qty = float(item.get("lotSizeFilter", {}).get("minOrderQty", 0.01))
+                price_tick_size = float(item.get("priceFilter", {}).get("tickSize", 5.0))
 
-            min_order_qty = float(item.get("lotSizeFilter", {}).get("minOrderQty", 0.01))
-            price_tick_size = float(item.get("priceFilter", {}).get("tickSize", 5.0))
-
-            contracts.append(
-                OptionContractInfo(
-                    symbol=raw_symbol,
-                    instrument_id=instrument_id,
-                    strike=strike,
-                    option_type=options_type,
-                    delivery_time_ms=delivery_time_ms,
-                    expiry_str=expiry_str,
-                    min_order_qty=min_order_qty,
-                    price_tick_size=price_tick_size,
+                contracts.append(
+                    OptionContractInfo(
+                        symbol=raw_symbol,
+                        instrument_id=instrument_id,
+                        strike=strike,
+                        option_type=options_type,
+                        delivery_time_ms=delivery_time_ms,
+                        expiry_str=expiry_str,
+                        min_order_qty=min_order_qty,
+                        price_tick_size=price_tick_size,
+                    )
                 )
-            )
 
-        return contracts
+            if contracts:
+                self._cached_contracts = contracts
+                self._cached_contracts_ts = now
+                return contracts
+
+        except Exception as e:
+            if self._cached_contracts:
+                return self._cached_contracts
+            raise e
+
+        return self._cached_contracts
 
     def select_atm_straddle(
         self,

@@ -855,12 +855,20 @@ class StraddleExecutionManager:
 
     def _fetch_option_ticker(self, symbol: str) -> Dict[str, float]:
         """Fetch real-time ticker quotes for a given option contract."""
+        now = time.time()
+        if not hasattr(self, "_ticker_cache"):
+            self._ticker_cache = {}
+        if symbol in self._ticker_cache:
+            entry = self._ticker_cache[symbol]
+            if now - entry["ts"] < 1.0:
+                return entry["data"]
+
         url = f"{self.base_url}/v5/market/tickers?category=option&symbol={symbol}"
         try:
             res = requests.get(url, timeout=5).json()
             if res.get("retCode") == 0 and res.get("result", {}).get("list"):
                 item = res["result"]["list"][0]
-                return {
+                data = {
                     "bid1Price": float(item.get("bid1Price") or 0.0),
                     "ask1Price": float(item.get("ask1Price") or 0.0),
                     "bid1Size": float(item.get("bid1Size") or 0.0),
@@ -871,6 +879,8 @@ class StraddleExecutionManager:
                     "vega": float(item.get("vega") or 0.0),
                     "theta": float(item.get("theta") or 0.0),
                 }
+                self._ticker_cache[symbol] = {"ts": now, "data": data}
+                return data
         except Exception as e:
             logger.error(f"Failed to fetch ticker for {symbol}: {e}")
         return {"bid1Price": 0.0, "ask1Price": 0.0, "bid1Size": 0.0, "ask1Size": 0.0, "markPrice": 0.0}
