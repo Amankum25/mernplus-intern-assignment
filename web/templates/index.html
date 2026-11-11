@@ -814,6 +814,14 @@
       transition: all 0.15s ease;
     }
 
+    .btn-shock:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+      pointer-events: none;
+      box-shadow: none !important;
+      transform: none !important;
+    }
+
     .btn-shock-sl {
       background: var(--danger-bg);
       border-color: var(--danger-border);
@@ -985,14 +993,18 @@
       <div class="badge badge-neutral" id="envBadge">
         <span class="dot"></span> BYBIT DEMO
       </div>
-      <div class="badge badge-success" id="marketDataBadge">
-        <span class="dot"></span> MARKET DATA — CONNECTED
+      <div class="badge badge-neutral" id="portfolioSyncBadge" style="font-family: 'JetBrains Mono', monospace; font-size: 0.68rem; font-weight: 700; border-color: var(--primary-border);">
+        <span class="dot" style="background: var(--primary);"></span>
+        <span id="headerSyncText">STRADDLES: 0 | BYBIT LEGS: 0</span>
       </div>
-      <div class="badge badge-success" id="privateApiBadge">
-        <span class="dot"></span> PRIVATE API — AUTHENTICATED
+      <div class="badge badge-neutral" id="marketDataBadge">
+        <span class="dot"></span> MARKET DATA — WAITING
       </div>
-      <div class="badge badge-primary" id="engineBadge">
-        <span class="dot"></span> NAUTILUSTRADER — RUNNING
+      <div class="badge badge-neutral" id="privateApiBadge">
+        <span class="dot"></span> PRIVATE API — NOT CONNECTED
+      </div>
+      <div class="badge badge-neutral" id="engineBadge">
+        <span class="dot"></span> NAUTILUSTRADER — STOPPED
       </div>
       
       <!-- Theme Switcher Toggle (Dark / Light) -->
@@ -1055,7 +1067,7 @@
         <div class="stat-box">
           <div class="stat-label">Data Freshness</div>
           <div class="stat-value" id="dataFreshnessVal" style="font-size: 0.78rem; color: var(--success); display: flex; align-items: center; gap: 0.3rem; margin-top: 0.2rem;">
-            <span class="dot" style="background: var(--success);"></span> LIVE WS & REST
+            <span class="dot" style="background: var(--text-muted);"></span> WAITING FOR NAUTILUSTRADER
           </div>
         </div>
       </div>
@@ -1190,28 +1202,48 @@
         </div>
       </div>
 
-      <!-- DEDICATED ORDER QUANTITY CONTROL STRIP -->
-      <div style="background: var(--secondary-bg); border: 1px solid var(--border); border-radius: 7px; padding: 0.55rem 0.85rem; margin-bottom: 0.75rem; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.65rem;">
-        <div style="display: flex; align-items: center; gap: 0.65rem; flex-wrap: wrap;">
-          <div style="font-size: 0.76rem; font-weight: 700; color: var(--text-main); display: flex; align-items: center; gap: 0.35rem;">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
-            Order Quantity:
+      <!-- DEDICATED ORDER CONFIGURATION STRIP -->
+      <div style="background: var(--secondary-bg); border: 1px solid var(--border); border-radius: 7px; padding: 0.65rem 0.85rem; margin-bottom: 0.75rem; display: flex; flex-direction: column; gap: 0.55rem;">
+        <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.65rem;">
+          <div style="display: flex; align-items: center; gap: 0.65rem; flex-wrap: wrap;">
+            <div style="font-size: 0.76rem; font-weight: 700; color: var(--text-main); display: flex; align-items: center; gap: 0.35rem;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
+              Execution Strike:
+            </div>
+            <select id="execStrikeSelect" class="form-select" onchange="selectSpecificStrike(this.value)" style="padding: 0.25rem 0.55rem; font-size: 0.75rem; font-family: 'JetBrains Mono', monospace; font-weight: 700; min-width: 140px; cursor: pointer;">
+              <option value="">Auto ATM Strike</option>
+            </select>
+            <button class="btn-header" onclick="resetToAutoAtm()" style="font-size: 0.68rem; padding: 0.2rem 0.5rem; background: var(--primary-light); color: var(--primary); border-color: #C7D2FE;">
+              ⚡ Auto ATM Strike
+            </button>
           </div>
-          <div style="display: flex; align-items: center; gap: 0.35rem;">
-            <input type="number" id="tradeSizeInput" class="form-input" value="0.01" step="0.01" min="0.01" max="10.0" oninput="onQuantityChanged(this.value)">
-            <span style="font-size: 0.74rem; font-weight: 700; color: var(--primary);">BTC per leg</span>
-          </div>
-          <div style="display: flex; gap: 0.3rem;">
-            <button type="button" class="qty-preset-btn active" onclick="setQuantityPreset(0.01)">0.01</button>
-            <button type="button" class="qty-preset-btn" onclick="setQuantityPreset(0.02)">0.02</button>
-            <button type="button" class="qty-preset-btn" onclick="setQuantityPreset(0.05)">0.05</button>
-            <button type="button" class="qty-preset-btn" onclick="setQuantityPreset(0.10)">0.10</button>
+          <div id="strikeActionNotice" style="font-size: 0.72rem; font-weight: 600; padding: 0.2rem 0.55rem; border-radius: 4px; background: rgba(59, 130, 246, 0.1); color: var(--primary);">
+            Ready to execute
           </div>
         </div>
-        <div style="font-size: 0.74rem; color: var(--text-muted); display: flex; align-items: center; gap: 0.45rem;">
-          <span>Est. Total Premium:</span>
-          <span class="font-mono" id="estTotalPremiumVal" style="font-weight: 700; color: var(--text-main);">$0.00 USD</span>
-          <span style="font-size: 0.68rem; color: var(--text-muted);">(Total 2 Legs)</span>
+
+        <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.65rem; border-top: 1px solid var(--border); padding-top: 0.5rem;">
+          <div style="display: flex; align-items: center; gap: 0.65rem; flex-wrap: wrap;">
+            <div style="font-size: 0.76rem; font-weight: 700; color: var(--text-main); display: flex; align-items: center; gap: 0.35rem;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+              Order Quantity:
+            </div>
+            <div style="display: flex; align-items: center; gap: 0.35rem;">
+              <input type="number" id="tradeSizeInput" class="form-input" value="0.01" step="0.01" min="0.01" max="10.0" oninput="onQuantityChanged(this.value)">
+              <span style="font-size: 0.74rem; font-weight: 700; color: var(--primary);">BTC per leg</span>
+            </div>
+            <div style="display: flex; gap: 0.3rem;">
+              <button type="button" class="qty-preset-btn active" onclick="setQuantityPreset(0.01)">0.01</button>
+              <button type="button" class="qty-preset-btn" onclick="setQuantityPreset(0.02)">0.02</button>
+              <button type="button" class="qty-preset-btn" onclick="setQuantityPreset(0.05)">0.05</button>
+              <button type="button" class="qty-preset-btn" onclick="setQuantityPreset(0.10)">0.10</button>
+            </div>
+          </div>
+          <div style="font-size: 0.74rem; color: var(--text-muted); display: flex; align-items: center; gap: 0.45rem;">
+            <span>Est. Total Premium:</span>
+            <span class="font-mono" id="estTotalPremiumVal" style="font-weight: 700; color: var(--text-main);">$0.00 USD</span>
+            <span style="font-size: 0.68rem; color: var(--text-muted);">(Total 2 Legs)</span>
+          </div>
         </div>
       </div>
 
@@ -1276,8 +1308,25 @@
             <span class="badge badge-primary" id="strategyLevelBadge">LEVEL 2</span>
           </div>
           <button class="btn btn-danger" id="btnCloseAllBtn" onclick="stopStraddle()" style="padding: 0.25rem 0.65rem; font-size: 0.7rem; font-weight: 600;">
-            Close Positions (Market Buyback)
+            Close All Positions (Market Buyback)
           </button>
+        </div>
+
+        <!-- MULTI-STRATEGY SELECTION & LIVE MONITORING BAR -->
+        <div class="multi-option-bar" id="multiOptionBar" style="display: none; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.45rem; padding: 0.4rem 0.65rem; background: var(--card-bg); border: 1px solid var(--border); border-radius: 6px;">
+          <div style="display: flex; align-items: center; gap: 0.5rem; flex: 1; min-width: 280px;">
+            <span style="font-size: 0.72rem; font-weight: 700; color: var(--primary); display: flex; align-items: center; gap: 0.3rem; white-space: nowrap;">
+              🎯 Select Strategy to Monitor:
+            </span>
+            <select id="monitoredStrategySelect" onchange="onMonitoredStrategyChanged(this.value)" style="flex: 1; font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; font-weight: 600; padding: 0.28rem 0.55rem; background: var(--secondary-bg); color: var(--text-main); border: 1px solid var(--border); border-radius: 4px; cursor: pointer;">
+              <option value="ALL">🌐 All Active Strategies (Combined Portfolio)</option>
+            </select>
+          </div>
+          <div style="display: flex; align-items: center; gap: 0.45rem;">
+            <button class="btn btn-danger" id="btnCloseFocusedBtn" onclick="closeFocusedStrategy()" style="padding: 0.28rem 0.75rem; font-size: 0.72rem; font-weight: 700; white-space: nowrap;">
+              Close Strategy (Both Legs)
+            </button>
+          </div>
         </div>
 
         <!-- LEVEL 1 MANUAL DECISION NOTIFICATION BANNER -->
@@ -1356,16 +1405,77 @@
     <!-- SECTION 5: ORDERS AND POSITIONS (TABS) -->
     <section class="card">
       <div class="tabs-header">
-        <button class="tab-btn active" id="tabOrdersBtn" onclick="switchTab('orders')">
-          Orders History (<span id="ordersCountVal">0</span>)
+        <button class="tab-btn active" id="tabPositionsBtn" onclick="switchTab('positions')">
+          Active Straddles (<span id="positionsCountVal">0</span>)
         </button>
-        <button class="tab-btn" id="tabPositionsBtn" onclick="switchTab('positions')">
-          Active Positions (<span id="positionsCountVal">0</span>)
+        <button class="tab-btn" id="tabLegsBtn" onclick="switchTab('legs')">
+          Bybit Contract Legs (<span id="legsCountVal">0</span>)
+        </button>
+        <button class="tab-btn" id="tabOrdersBtn" onclick="switchTab('orders')">
+          Orders History (<span id="ordersCountVal">0</span>)
         </button>
       </div>
 
+      <!-- Straddles View (Default Active) -->
+      <div id="positionsView">
+        <div style="display: flex; align-items: center; justify-content: space-between; background: rgba(59, 130, 246, 0.08); border: 1px solid var(--border); border-radius: 6px; padding: 0.35rem 0.65rem; margin-bottom: 0.55rem; font-size: 0.72rem; color: var(--text-muted); flex-wrap: wrap; gap: 0.35rem;">
+          <span>💡 <strong>Straddle Structure:</strong> Each strategy entry has 2 legs (1 Call + 1 Put). Entries using the same contracts appear as separate dashboard rows, while Bybit nets them by contract.</span>
+          <span style="font-family: 'JetBrains Mono', monospace; font-weight: 700; color: var(--primary);">Each entry = 2 legs</span>
+        </div>
+        <div class="table-scroll-container">
+          <table>
+            <thead>
+              <tr>
+                <th>Strategy</th>
+                <th>Time</th>
+                <th>Legs (Call & Put)</th>
+                <th>Size</th>
+                <th>Combined Entry</th>
+                <th>Current Buyback</th>
+                <th>Unrealized PnL</th>
+                <th style="text-align: center;">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="positionsTableBody">
+              <tr>
+                <td colspan="8" style="text-align: center; color: var(--text-muted); padding: 1rem;">No active straddle strategies running.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Bybit Individual Contract Legs View -->
+      <div id="legsView" style="display: none;">
+        <div style="display: flex; align-items: center; justify-content: space-between; background: rgba(16, 185, 129, 0.08); border: 1px solid var(--border); border-radius: 6px; padding: 0.35rem 0.65rem; margin-bottom: 0.55rem; font-size: 0.72rem; color: var(--text-muted); flex-wrap: wrap; gap: 0.35rem;">
+          <span>📋 <strong>Bybit Unified Positions:</strong> Direct 1:1 view of open contract derivative positions from Bybit V5 (matching Bybit's Positions tab).</span>
+          <span style="font-family: 'JetBrains Mono', monospace; font-weight: 700; color: var(--success);" id="bybitLegsSummary">0 Legs Open on Bybit</span>
+        </div>
+        <div class="table-scroll-container">
+          <table>
+            <thead>
+              <tr>
+                <th>Contract Symbol</th>
+                <th>Type</th>
+                <th>Side</th>
+                <th>Quantity</th>
+                <th>Entry Price</th>
+                <th>Mark Price</th>
+                <th>Unrealized PnL</th>
+                <th style="text-align: center;">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="legsTableBody">
+              <tr>
+                <td colspan="8" style="text-align: center; color: var(--text-muted); padding: 1rem;">No open contract positions on Bybit.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
       <!-- Orders View -->
-      <div id="ordersView">
+      <div id="ordersView" style="display: none;">
         <div class="table-scroll-container">
           <table>
             <thead>
@@ -1377,34 +1487,12 @@
                 <th>Filled Qty</th>
                 <th>Avg Fill Price</th>
                 <th>Status</th>
+                <th>Action</th>
               </tr>
             </thead>
             <tbody id="ordersTableBody">
               <tr>
-                <td colspan="7" style="text-align: center; color: var(--text-muted); padding: 1rem;">No orders submitted yet.</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <!-- Positions View -->
-      <div id="positionsView" style="display: none;">
-        <div class="table-scroll-container">
-          <table>
-            <thead>
-              <tr>
-                <th>Contract</th>
-                <th>Side</th>
-                <th>Quantity</th>
-                <th>Avg Entry</th>
-                <th>Mark / Current Price</th>
-                <th>Unrealized PnL</th>
-              </tr>
-            </thead>
-            <tbody id="positionsTableBody">
-              <tr>
-                <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 1rem;">No open positions confirmed on Bybit.</td>
+                <td colspan="8" style="text-align: center; color: var(--text-muted); padding: 1rem;">No orders submitted yet.</td>
               </tr>
             </tbody>
           </table>
@@ -1510,6 +1598,10 @@
     let ws = null;
     let localLogs = [];
     let hasActivePositions = false;
+    let monitoredStrategyId = "ALL";
+    let cachedActiveStrategies = [];
+    let cachedLivePositions = [];
+    let isSubmittingStrategy = false;
 
     function fmtUSD(val) {
       if (val === undefined || val === null || isNaN(val)) return "$0.00";
@@ -1554,6 +1646,10 @@
           closeBtn.disabled = true;
           closeBtn.style.display = "none";
         }
+        const shockSlBtn = document.querySelector(".btn-shock-sl");
+        const shockTpBtn = document.querySelector(".btn-shock-tp");
+        if (shockSlBtn) shockSlBtn.disabled = true;
+        if (shockTpBtn) shockTpBtn.disabled = true;
         return;
       }
 
@@ -1676,25 +1772,41 @@
       // 4. Connect real-time WebSocket
       connectWebSocket();
 
-      // 5. Consolidated lightweight background sync every 4 seconds
-      setInterval(syncAllState, 4000);
+      // 5. Intelligent tiered background sync (fast & responsive)
+      setInterval(syncSessionState, 2500);
+      setInterval(syncMarketData, 3500);
     }
 
-    let isSyncing = false;
-    async function syncAllState() {
-      if (isSyncing) return;
-      isSyncing = true;
+    let isSyncingSession = false;
+    async function syncSessionState() {
+      if (isSyncingSession || document.hidden) return;
+      isSyncingSession = true;
       try {
-        await Promise.all([
-          fetchMarketData(selectedExpiryMs, selectedStrike),
-          fetchSessionState(),
-          fetchOrders(),
-        ]);
+        await fetchSessionState();
       } catch (e) {
-        console.error("Sync error:", e);
       } finally {
-        isSyncing = false;
+        isSyncingSession = false;
       }
+    }
+
+    let isSyncingMarket = false;
+    async function syncMarketData() {
+      if (isSyncingMarket || document.hidden) return;
+      isSyncingMarket = true;
+      try {
+        await fetchMarketData(selectedExpiryMs, selectedStrike);
+      } catch (e) {
+      } finally {
+        isSyncingMarket = false;
+      }
+    }
+
+    async function syncAllState() {
+      await Promise.all([
+        fetchMarketData(selectedExpiryMs, selectedStrike),
+        fetchSessionState(),
+        fetchOrders(true),
+      ]);
     }
 
     async function testConnection() {
@@ -1705,7 +1817,9 @@
         if (res.ok) {
           const data = await res.json();
           document.getElementById("envBadge").innerHTML = `<span class="dot"></span> BYBIT ${data.environment || "DEMO"}`;
-          document.getElementById("marketDataBadge").innerHTML = `<span class="dot"></span> PUBLIC MARKET DATA — ${data.market_data_connected ? "CONNECTED" : "DISCONNECTED"}`;
+          const marketBadge = document.getElementById("marketDataBadge");
+          marketBadge.className = `badge ${data.market_data_connected ? "badge-success" : "badge-neutral"}`;
+          marketBadge.innerHTML = `<span class="dot"></span> NAUTILUSTRADER MARKET DATA — ${data.market_data_connected ? "CONNECTED" : "DISCONNECTED"}`;
           
           const privateBadge = document.getElementById("privateApiBadge");
           if (data.private_api_authenticated) {
@@ -1713,7 +1827,7 @@
             privateBadge.innerHTML = `<span class="dot"></span> PRIVATE API — AUTHENTICATED`;
           } else {
             privateBadge.className = "badge badge-neutral";
-            privateBadge.innerHTML = `<span class="dot"></span> PRIVATE API — NO KEYS / DEMO`;
+            privateBadge.innerHTML = `<span class="dot"></span> PRIVATE API — NOT CONNECTED`;
           }
 
           const engBadge = document.getElementById("engineBadge");
@@ -1728,8 +1842,8 @@
     }
 
     let isFetchingMarket = false;
-    async function fetchMarketData(expiryMs = null, strike = null) {
-      if (isFetchingMarket) return;
+    async function fetchMarketData(expiryMs = null, strike = null, force = false) {
+      if (isFetchingMarket && !force) return;
       isFetchingMarket = true;
       try {
         let url = "/api/market";
@@ -1739,14 +1853,28 @@
         if (params.length > 0) url += "?" + params.join("&");
 
         const res = await fetch(url);
-        if (!res.ok) return;
+        if (!res.ok) {
+          const freshness = document.getElementById("dataFreshnessVal");
+          let detail = `HTTP ${res.status}`;
+          try { detail = (await res.json()).detail || detail; } catch (_) {}
+          if (freshness) {
+            freshness.innerText = "NAUTILUSTRADER ADAPTER UNAVAILABLE";
+            freshness.style.color = "var(--danger)";
+            freshness.title = detail;
+          }
+          return;
+        }
         const data = await res.json();
         currentMarket = data;
 
-        document.getElementById("btcPriceVal").innerText = fmtUSD(data.btc_price);
-        document.getElementById("targetExpiryVal").innerText = data.expiry_str;
-        document.getElementById("availableContractsVal").innerText = data.available_contracts_count || "48+";
-        document.getElementById("atmStrikeVal").innerText = fmtStrike(data.atm_strike);
+        const setTxt = (id, val) => {
+          const el = document.getElementById(id);
+          if (el) el.innerText = val;
+        };
+        setTxt("btcPriceVal", fmtUSD(data.btc_price));
+        setTxt("targetExpiryVal", data.expiry_str);
+        setTxt("availableContractsVal", data.available_contracts_count ?? 0);
+        setTxt("atmStrikeVal", fmtStrike(data.atm_strike));
 
         const expSelect = document.getElementById("expirySelect");
         if (expSelect && data.available_expiries && expSelect.children.length <= 1) {
@@ -1758,11 +1886,27 @@
 
         renderStrikeChips(data);
         renderOptionLegs(data);
-      } catch (err) {} finally {
+
+        const freshness = document.getElementById("dataFreshnessVal");
+        if (freshness) {
+          freshness.innerText = data.pair_validated ? "NAUTILUSTRADER • LIVE QUOTES" : "LIVE TWO-SIDED QUOTE MISSING";
+          freshness.style.color = data.pair_validated ? "var(--success)" : "var(--warning)";
+          freshness.title = "Market data from NautilusTrader's native Bybit adapter.";
+        }
+      } catch (err) {
+        console.error("[fetchMarketData] error:", err);
+        const freshness = document.getElementById("dataFreshnessVal");
+        if (freshness) {
+          freshness.innerText = "MARKET DATA STALE";
+          freshness.style.color = "var(--danger)";
+          freshness.title = String(err);
+        }
+      } finally {
         isFetchingMarket = false;
       }
     }
 
+    let lastRenderedMatrixKey = "";
     function renderStrikeChips(data) {
       const container = document.getElementById("strikeChipsContainer");
       if (!container || !data.strike_matrix) return;
@@ -1772,16 +1916,21 @@
 
       const modeLabel = document.getElementById("strikeSelectionModeLabel");
       if (modeLabel) {
-        if (selectedStrike === null || selectedStrike === atmStrike) {
-          modeLabel.innerText = "Auto ATM Active";
-          modeLabel.style.color = "var(--primary)";
-        } else {
-          modeLabel.innerText = `Manual: $${selectedStrike.toLocaleString()}`;
-          modeLabel.style.color = "var(--warning)";
+        const targetText = (selectedStrike === null || selectedStrike === atmStrike) ? "Auto ATM Active" : `Manual: $${selectedStrike.toLocaleString()}`;
+        if (modeLabel.innerText !== targetText) {
+          modeLabel.innerText = targetText;
+          modeLabel.style.color = (selectedStrike === null || selectedStrike === atmStrike) ? "var(--primary)" : "var(--warning)";
         }
       }
 
-      container.innerHTML = data.strike_matrix.map(item => {
+      // Check if strike matrix structure changed before touching DOM
+      const matrixKey = `${atmStrike}_${activeStrike}_${data.strike_matrix.map(m => m.strike + ':' + m.diff.toFixed(0)).join(',')}`;
+      if (lastRenderedMatrixKey === matrixKey && container.children.length > 0) {
+        return; // Fast path: avoid expensive reflow
+      }
+      lastRenderedMatrixKey = matrixKey;
+
+      const html = data.strike_matrix.map(item => {
         const isAtm = item.is_atm;
         const isSel = (item.strike === activeStrike);
         const diffStr = item.diff > 0 ? `+${fmtUSD(item.diff)}` : fmtUSD(item.diff);
@@ -1797,6 +1946,61 @@
           </div>
         `;
       }).join("");
+
+      if (container.innerHTML !== html) {
+        container.innerHTML = html;
+      }
+    }
+
+    function updateExecutionNotice() {
+      const b1 = document.getElementById("btnExecLevel1");
+      const b2 = document.getElementById("btnExecLevel2");
+      const notice = document.getElementById("strikeActionNotice");
+      const activeStrike = (selectedStrike !== null && selectedStrike !== undefined) 
+        ? selectedStrike 
+        : (currentMarket ? currentMarket.atm_strike : null);
+      
+      const qtyInput = document.getElementById("tradeSizeInput");
+      const qty = qtyInput ? (parseFloat(qtyInput.value) || 0.01) : 0.01;
+      const strats = cachedActiveStrategies || [];
+      const strikeStrats = strats.filter(s => {
+        const sameStrike = activeStrike && Math.abs(parseFloat(s.strike) - activeStrike) < 1.0;
+        const sameExpiry = !selectedExpiryMs || !s.expiry_ms || Number(s.expiry_ms) === Number(selectedExpiryMs);
+        return sameStrike && sameExpiry;
+      });
+      const strikeFmt = activeStrike ? `$${Number(activeStrike).toLocaleString()}` : "ATM";
+      const nextNum = strats.length + 1;
+
+      if (strikeStrats.length > 0) {
+        const nextNum = strats.length + 1;
+        if (b1 && b1.innerText !== "Placing Orders...") {
+          b1.innerText = `Open Straddle #${nextNum}: Level 1 (${strikeFmt}, ${qty} BTC)`;
+        }
+        if (b2 && b2.innerText !== "Placing Orders...") {
+          b2.innerText = `Open Straddle #${nextNum}: Level 2 (${strikeFmt}, ${qty} BTC)`;
+        }
+        if (notice) {
+          notice.style.background = "rgba(245, 158, 11, 0.12)";
+          notice.style.color = "var(--warning)";
+          notice.innerText = `This strike already has an active straddle. Executing opens a separate ${qty} BTC strategy entry. Bybit combines identical contracts into net positions; this dashboard keeps separate strategy rows.`;
+        }
+      } else {
+        if (b1 && b1.innerText !== "Placing Orders...") {
+          b1.innerText = strats.length > 0 
+            ? `Execute Straddle #${nextNum}: Level 1 (${strikeFmt}, ${qty} BTC)`
+            : `Execute Level 1: ${strikeFmt} (${qty} BTC)`;
+        }
+        if (b2 && b2.innerText !== "Placing Orders...") {
+          b2.innerText = strats.length > 0 
+            ? `Execute Straddle #${nextNum}: Level 2 (${strikeFmt}, ${qty} BTC)`
+            : `Execute Level 2: ${strikeFmt} (${qty} BTC)`;
+        }
+        if (notice) {
+          notice.style.background = "rgba(16, 185, 129, 0.12)";
+          notice.style.color = "var(--success)";
+          notice.innerText = `Strike ${strikeFmt} is unopened. Executing will open a new straddle (opening 2 new legs on Bybit).`;
+        }
+      }
     }
 
     function updateStrikeChipsSelection() {
@@ -1824,6 +2028,23 @@
           chip.classList.remove("is-selected");
         }
       });
+
+      // Synchronize execution strike dropdown
+      const execSelect = document.getElementById("execStrikeSelect");
+      if (execSelect && currentMarket && currentMarket.available_strikes) {
+        let opts = "";
+        currentMarket.available_strikes.forEach(s => {
+          const isAtm = (s === currentMarket.atm_strike);
+          const isSelected = (s === activeStrike);
+          const isOpen = (cachedActiveStrategies || []).some(strat => Math.abs(parseFloat(strat.strike) - s) < 1.0);
+          const tag = isAtm ? " (ATM)" : (isOpen ? " (OPEN ON BYBIT)" : "");
+          opts += `<option value="${s}" ${isSelected ? "selected" : ""}>$${s.toLocaleString()}${tag}</option>`;
+        });
+        if (execSelect.innerHTML !== opts && document.activeElement !== execSelect) {
+          execSelect.innerHTML = opts;
+        }
+      }
+      updateExecutionNotice();
     }
 
     function renderOptionLegs(data) {
@@ -1831,43 +2052,67 @@
       const call = data.call_contract;
       const put = data.put_contract;
 
-      document.getElementById("callSymbolVal").innerText = call.symbol;
-      document.getElementById("callStrikeVal").innerText = fmtStrike(call.strike);
-      document.getElementById("callExpiryVal").innerText = call.expiry || data.expiry_str;
-      document.getElementById("callBidVal").innerText = fmtUSD(call.bid);
-      document.getElementById("callBidQtyVal").innerText = `${call.bid_qty || 1.0} BTC`;
-      document.getElementById("callAskVal").innerText = fmtUSD(call.ask);
-      document.getElementById("callAskQtyVal").innerText = `${call.ask_qty || 1.0} BTC`;
+      const setTxt = (id, val) => {
+        const el = document.getElementById(id);
+        if (el) el.innerText = val;
+      };
 
-      document.getElementById("putSymbolVal").innerText = put.symbol;
-      document.getElementById("putStrikeVal").innerText = fmtStrike(put.strike);
-      document.getElementById("putExpiryVal").innerText = put.expiry || data.expiry_str;
-      document.getElementById("putBidVal").innerText = fmtUSD(put.bid);
-      document.getElementById("putBidQtyVal").innerText = `${put.bid_qty || 1.0} BTC`;
-      document.getElementById("putAskVal").innerText = fmtUSD(put.ask);
-      document.getElementById("putAskQtyVal").innerText = `${put.ask_qty || 1.0} BTC`;
+      setTxt("callSymbolVal", call.symbol || "");
+      setTxt("callStrikeVal", fmtStrike(call.strike));
+      setTxt("callExpiryVal", call.expiry || data.expiry_str || "");
+      setTxt("callBidVal", fmtUSD(call.bid));
+      setTxt("callBidQtyVal", `${call.bid_qty || 0} BTC`);
+      setTxt("callAskVal", fmtUSD(call.ask));
+      setTxt("callAskQtyVal", `${call.ask_qty || 0} BTC`);
+      const callBadge = document.getElementById("callTradableBadge");
+      if (callBadge) {
+        callBadge.innerText = call.status || "TRADABLE";
+        callBadge.className = call.status === "TRADABLE" ? "badge badge-success" : "badge badge-neutral";
+      }
+
+      setTxt("putSymbolVal", put.symbol || "");
+      setTxt("putStrikeVal", fmtStrike(put.strike));
+      setTxt("putExpiryVal", put.expiry || data.expiry_str || "");
+      setTxt("putBidVal", fmtUSD(put.bid));
+      setTxt("putBidQtyVal", `${put.bid_qty || 0} BTC`);
+      setTxt("putAskVal", fmtUSD(put.ask));
+      setTxt("putAskQtyVal", `${put.ask_qty || 0} BTC`);
+      const putBadge = document.getElementById("putTradableBadge");
+      if (putBadge) {
+        putBadge.innerText = put.status || "TRADABLE";
+        putBadge.className = put.status === "TRADABLE" ? "badge badge-success" : "badge badge-neutral";
+      }
+
+      const pairBadge = document.getElementById("pairStatusBadge");
+      if (pairBadge) {
+        pairBadge.className = data.pair_validated ? "badge badge-success" : "badge badge-warning";
+        pairBadge.innerHTML = `<span class="dot"></span> ${data.pair_validated ? "PAIR VALIDATED" : "AWAITING QUOTES"}`;
+      }
 
       const banner = document.getElementById("pairValidationBanner");
-      const estEntry = (call.bid + put.bid) > 0 ? (call.bid + put.bid) : (call.ask + put.ask);
-      document.getElementById("estCombinedEntryVal").innerText = `Est. Entry Premium: ${fmtUSD(estEntry)}`;
+      const estEntry = (call.bid + put.bid) > 0 ? (call.bid + put.bid) : 0;
+      setTxt("estCombinedEntryVal", `Est. Entry Premium: ${fmtUSD(estEntry)}`);
 
-      const currentQty = parseFloat(document.getElementById("tradeSizeInput").value) || 0.01;
+      const qtyInput = document.getElementById("tradeSizeInput");
+      const currentQty = qtyInput ? (parseFloat(qtyInput.value) || 0.01) : 0.01;
       onQuantityChanged(currentQty);
 
-      const isPairValid = Boolean(
-        data.pair_validated || 
-        (call && put && call.strike && put.strike && call.strike === put.strike)
-      );
+      const isPairValid = Boolean(data.pair_validated);
 
-      if (isPairValid) {
-        banner.className = "pair-validation-banner";
-        banner.innerHTML = `
-          <span>Call and Put verified: Same underlying BTC, strike (${fmtStrike(call.strike)}), expiry (${data.expiry_str}), tradable on Bybit Testnet.</span>
-          <span class="font-mono">Est. Combined Entry: ${fmtUSD(estEntry)}</span>
-        `;
-      } else {
-        banner.className = "pair-validation-banner invalid";
-        banner.innerHTML = `<span>PAIR INVALID: Call and Put strike or expiry mismatch. Please select ATM.</span>`;
+      if (banner) {
+        if (isPairValid) {
+          banner.className = "pair-validation-banner";
+          banner.innerHTML = `
+            <span>Call and Put verified: Same underlying BTC, strike (${fmtStrike(call.strike)}), expiry (${data.expiry_str}), tradable on Bybit Testnet.</span>
+            <span class="font-mono" id="estCombinedEntryVal">Est. Entry Premium: ${fmtUSD(estEntry)}</span>
+          `;
+        } else {
+          banner.className = "pair-validation-banner invalid";
+          banner.innerHTML = `
+            <span>LIVE PAIR UNAVAILABLE: matching Call and Put contracts must both have live bid and ask quotes before order entry.</span>
+            <span class="font-mono" id="estCombinedEntryVal" style="display:none;">Est. Entry Premium: ${fmtUSD(estEntry)}</span>
+          `;
+        }
       }
     }
 
@@ -1907,25 +2152,35 @@
     }
 
     function selectSpecificStrike(strike) {
+      if (!strike) {
+        resetToAutoAtm();
+        return;
+      }
       selectedStrike = parseFloat(strike);
       updateStrikeChipsSelection();
-      fetchMarketData(selectedExpiryMs, selectedStrike);
+      fetchMarketData(selectedExpiryMs, selectedStrike, true);
     }
 
     function resetToAutoAtm() {
       selectedStrike = null;
       updateStrikeChipsSelection();
-      fetchMarketData(selectedExpiryMs, null);
+      fetchMarketData(selectedExpiryMs, null, true);
     }
 
     function onExpiryChanged() {
       const expSelect = document.getElementById("expirySelect");
       selectedExpiryMs = parseInt(expSelect.value);
       selectedStrike = null;
-      fetchMarketData(selectedExpiryMs, null);
+      fetchMarketData(selectedExpiryMs, null, true);
     }
 
     async function executeStrategy(level) {
+      if (isSubmittingStrategy) return;
+      if (!currentMarket || !currentMarket.pair_validated) {
+        showToast("Cannot submit: NautilusTrader has not confirmed live quotes for both legs.", "error");
+        return;
+      }
+      isSubmittingStrategy = true;
       currentStrategyLevel = level;
       const btn = level === 1 ? document.getElementById("btnExecLevel1") : document.getElementById("btnExecLevel2");
       const originalText = btn.innerText;
@@ -1933,14 +2188,16 @@
       btn.innerText = "Placing Orders...";
 
       const qty = parseFloat(document.getElementById("tradeSizeInput").value) || 0.01;
-
+      const activeStrike = selectedStrike !== null && selectedStrike !== undefined
+        ? selectedStrike
+        : (currentMarket ? currentMarket.atm_strike : null);
       try {
         const payload = {
           level: level,
           trade_size: qty,
           simulated: false,
           target_expiry_ms: selectedExpiryMs,
-          target_strike: selectedStrike,
+          target_strike: activeStrike,
         };
 
         const res = await fetch("/api/straddle/start", {
@@ -1951,69 +2208,106 @@
 
         const data = await res.json();
         if (res.ok) {
+          showToast(data.message || `Straddle orders successfully placed on Bybit!`, "success");
+          switchTab('positions');
           await syncAllState();
         } else {
-          alert(`Execution error: ${data.detail || "Failed to submit straddle orders."}`);
+          showToast(`Execution error: ${data.detail || "Failed to submit straddle orders."}`, "error");
         }
       } catch (err) {
         alert(`Network error: ${err}`);
       } finally {
-        btn.disabled = false;
-        btn.innerText = originalText;
+        isSubmittingStrategy = false;
+        const b1 = document.getElementById("btnExecLevel1");
+        const b2 = document.getElementById("btnExecLevel2");
+        if (b1) b1.disabled = false;
+        if (b2) b2.disabled = false;
+        updateExecutionNotice();
       }
     }
 
     async function stopStraddle() {
       const btn = document.getElementById("btnCloseAllBtn");
       const manualBtn = document.getElementById("btnLevel1QuickClose");
-      if (btn) {
-        btn.disabled = true;
-        btn.innerText = "Closing...";
-      }
-      if (manualBtn) {
-        manualBtn.disabled = true;
-        manualBtn.innerText = "Closing...";
-      }
+      if (btn) { btn.disabled = true; btn.innerText = "Submitting closes..."; }
+      if (manualBtn) { manualBtn.disabled = true; manualBtn.innerText = "Submitting closes..."; }
       try {
         const res = await fetch("/api/straddle/stop", { method: "POST" });
-        if (res.ok) {
-          syncAllState();
-        }
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || data.message || "Close request failed");
+        showToast(data.message || "NautilusTrader close requests submitted.", data.status === "ERROR" ? "error" : "info");
+        await syncAllState();
       } catch (err) {
-        console.error("Stop error:", err);
+        showToast("Close error: " + (err.message || err), "error");
       } finally {
-        if (btn) {
-          btn.disabled = false;
-          btn.innerText = "Close Positions (Market Buyback)";
-        }
-        if (manualBtn) {
-          manualBtn.disabled = false;
-        }
+        if (btn) { btn.disabled = false; btn.innerText = "Close Positions (Market Buyback)"; }
+        if (manualBtn) { manualBtn.disabled = false; manualBtn.innerText = "Quick Close"; }
       }
     }
 
     async function simulateShock(shockType) {
+      if (!hasActivePositions) {
+        alert("No active straddle position to shock. Please execute Level 1 or Level 2 first.");
+        return;
+      }
       const isSL = shockType === "STOP_LOSS";
       const btn = isSL ? document.querySelector(".btn-shock-sl") : document.querySelector(".btn-shock-tp");
       const origHtml = btn ? btn.innerHTML : "";
+      const isSingleStrat = Boolean(monitoredStrategyId && monitoredStrategyId !== "ALL");
+
       if (btn) {
         btn.disabled = true;
-        btn.innerHTML = isSL ? "⚡ Triggering SL Shock..." : "🎯 Triggering TP Shock...";
+        btn.innerHTML = isSL 
+          ? (isSingleStrat ? `⚡ Triggering SL Shock (Both Legs)...` : "⚡ Triggering SL Shock (All Strategies)...") 
+          : (isSingleStrat ? `🎯 Triggering TP Shock (Both Legs)...` : "🎯 Triggering TP Shock (All Strategies)...");
+      }
+
+      // ONLY optimistically wipe everything if ALL strategies are being closed
+      if (!isSingleStrat) {
+        hasActivePositions = false;
+        const stateBadge = document.getElementById("strategyStateBadge");
+        if (stateBadge) {
+          stateBadge.innerText = "CLOSED";
+          stateBadge.className = "badge badge-neutral";
+        }
+        const closeBtn = document.getElementById("btnCloseAllBtn");
+        if (closeBtn) {
+          closeBtn.disabled = true;
+          closeBtn.style.display = "none";
+        }
+        const level1Banner = document.getElementById("level1ManualBanner");
+        if (level1Banner) level1Banner.style.display = "none";
+        const btnLevel1Close = document.getElementById("btnLevel1QuickClose");
+        if (btnLevel1Close) btnLevel1Close.style.display = "none";
+
+        document.getElementById("combinedEntryVal").innerText = "$0.00";
+        document.getElementById("currentBuybackVal").innerText = "$0.00";
+        document.getElementById("riskTargetsVal").innerText = "SL: $0.00 | TP: $0.00";
+        document.getElementById("riskTargetsVal").style.color = "var(--text-main)";
+        updatePnlDisplay(0.0, 0.0, 2);
+        renderStrategies([]);
       }
 
       try {
-        if (!hasActivePositions) {
-          await executeStrategy(2);
-          await new Promise(r => setTimeout(r, 700));
-        }
-
+        const payload = {
+          shock_type: shockType,
+          strategy_id: isSingleStrat ? monitoredStrategyId : null,
+        };
         const res = await fetch("/api/straddle/shock", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ shock_type: shockType }),
+          body: JSON.stringify(payload),
         });
         const data = await res.json();
-        await syncAllState();
+        if (res.ok) {
+          if (isSingleStrat) {
+            monitoredStrategyId = "ALL";
+          }
+          await new Promise(r => setTimeout(r, 400));
+          await syncAllState();
+        } else {
+          alert(`Shock error: ${data.detail || data.message || "Failed"}`);
+        }
       } catch (e) {
         console.error("Shock error:", e);
       } finally {
@@ -2042,19 +2336,21 @@
         if (!res.ok) return;
         const session = await res.json();
 
-        const isRunning = session.is_running;
+        const isRunning = Boolean(session.is_running);
         const stateName = session.strategy_state || (isRunning ? "OPEN" : "IDLE");
 
         const stateBadge = document.getElementById("strategyStateBadge");
-        stateBadge.innerText = stateName;
-        if (stateName === "OPEN" || stateName === "RUNNING") {
-          stateBadge.className = "badge badge-success";
-        } else if (stateName === "CLOSED") {
-          stateBadge.className = "badge badge-neutral";
-        } else if (stateName === "ENTRY_PENDING" || stateName === "EXIT_TRIGGERED") {
-          stateBadge.className = "badge badge-warning";
-        } else {
-          stateBadge.className = "badge badge-neutral";
+        if (stateBadge) {
+          stateBadge.innerText = stateName;
+          if (stateName === "OPEN" || stateName === "RUNNING" || stateName === "ACTIVE_POSITION") {
+            stateBadge.className = "badge badge-success";
+          } else if (stateName === "CLOSED") {
+            stateBadge.className = "badge badge-neutral";
+          } else if (stateName === "ENTRY_PENDING" || stateName === "EXIT_TRIGGERED") {
+            stateBadge.className = "badge badge-warning";
+          } else {
+            stateBadge.className = "badge badge-neutral";
+          }
         }
 
         if (session.auto_exit_on_market !== undefined) {
@@ -2068,55 +2364,152 @@
         const closeBtn = document.getElementById("btnCloseAllBtn");
         const execL1 = document.getElementById("btnExecLevel1");
         const execL2 = document.getElementById("btnExecLevel2");
-        const hasPositions = session.live_positions && session.live_positions.length > 0;
-        const isTradeActive = Boolean(trade && trade.status === "OPEN" && isRunning && stateName !== "CLOSED");
-        hasActivePositions = Boolean(isTradeActive || hasPositions);
+        const multiOptionBar = document.getElementById("multiOptionBar");
+        const selectEl = document.getElementById("monitoredStrategySelect");
+        const btnCloseFocused = document.getElementById("btnCloseFocusedBtn");
+
+        const activeStrategies = session.active_strategies || [];
+        cachedActiveStrategies = activeStrategies;
+        const hasStrategies = activeStrategies.length > 0;
+
+        const livePositions = session.live_positions || [];
+        cachedLivePositions = livePositions;
+
+        // Trade is active IF engine is running AND state is not CLOSED/IDLE AND (active strategies exist OR trade is OPEN)
+        const isTradeActive = Boolean(isRunning && stateName !== "CLOSED" && stateName !== "IDLE" && (hasStrategies || (trade && trade.status === "OPEN")));
+        hasActivePositions = isTradeActive;
+
+        const shockSlBtn = document.querySelector(".btn-shock-sl");
+        const shockTpBtn = document.querySelector(".btn-shock-tp");
 
         if (hasActivePositions) {
+          if (shockSlBtn) shockSlBtn.disabled = false;
+          if (shockTpBtn) shockTpBtn.disabled = false;
           closeBtn.disabled = false;
           closeBtn.style.display = "inline-flex";
           execL1.disabled = false;
           execL2.disabled = false;
-          execL1.innerText = "Add Position: Level 1 (Naked)";
-          execL2.innerText = "Add Position: Level 2 (1% SL / 2% TP)";
-
-          let combinedEntry = trade ? trade.combined_entry_premium : 0.0;
-          let currentBuyback = trade ? trade.current_buyback_premium : 0.0;
-          let pnlUsd = trade ? trade.pnl_usd : 0.0;
-          let pnlPct = trade ? trade.pnl_pct : 0.0;
-
-          if ((!combinedEntry || combinedEntry <= 0) && hasPositions) {
-            combinedEntry = session.live_positions.reduce((acc, p) => acc + parseFloat(p.avgPrice || 0), 0);
-            currentBuyback = session.live_positions.reduce((acc, p) => acc + parseFloat(p.markPrice || 0), 0);
-            pnlUsd = session.live_positions.reduce((acc, p) => acc + parseFloat(p.unrealisedPnl || 0), 0);
-            pnlPct = combinedEntry > 0 ? ((combinedEntry - currentBuyback) / combinedEntry) * 100 : 0.0;
-          }
+          updateExecutionNotice();
 
           const tradeLevel = trade ? (trade.level || 2) : currentStrategyLevel;
           currentStrategyLevel = tradeLevel;
           document.getElementById("strategyLevelBadge").innerText = `LEVEL ${tradeLevel}`;
-          document.getElementById("combinedEntryVal").innerText = fmtUSD(combinedEntry);
-          document.getElementById("currentBuybackVal").innerText = fmtUSD(currentBuyback || combinedEntry);
 
-          // Update prominent Trade Profit (%) display & dynamic Level 1 manual controls
-          updatePnlDisplay(pnlPct, pnlUsd, tradeLevel);
+          // Update multi-strategy bar and dropdown
+          if (multiOptionBar) {
+            multiOptionBar.style.display = "flex";
+          }
+          if (selectEl) {
+            if (monitoredStrategyId !== "ALL" && !activeStrategies.some(s => s.strategy_id === monitoredStrategyId)) {
+              monitoredStrategyId = "ALL";
+            }
+            let opts = `<option value="ALL" ${monitoredStrategyId === "ALL" ? "selected" : ""}>🌐 All Active Strategies (Combined Portfolio: ${activeStrategies.length} Strategies)</option>`;
+            activeStrategies.forEach((s, idx) => {
+              const pnl = parseFloat(s.pnl_usd || 0.0);
+              const pnlPct = parseFloat(s.pnl_pct || 0.0);
+              const entry = parseFloat(s.combined_entry_premium || 0.0);
+              const sign = pnl >= 0 ? "+" : "";
+              const pctSign = pnlPct >= 0 ? "+" : "";
+              const name = s.name || `Strategy #${activeStrategies.length - idx}`;
+              const timeStr = s.time_str || (s.started_at ? s.started_at.split(' ')[1] : "");
+              const strikeStr = s.strike ? `$${Number(s.strike).toLocaleString()}` : "";
+              opts += `<option value="${s.strategy_id}" ${s.strategy_id === monitoredStrategyId ? "selected" : ""}>${name} (${timeStr}) | Strike ${strikeStr} | ${s.trade_size || 0.01} BTC | Entry: ${fmtUSD(entry)} | PnL: ${pctSign}${pnlPct.toFixed(2)}% (${sign}${fmtUSD(pnl)})</option>`;
+            });
+            if (selectEl.innerHTML !== opts && document.activeElement !== selectEl) {
+              selectEl.innerHTML = opts;
+            }
+          }
 
-          if (tradeLevel === 1) {
-            document.getElementById("riskTargetsVal").innerText = "MANUAL DECISION ONLY (NO AUTO SL/TP)";
-            document.getElementById("riskTargetsVal").style.color = "var(--primary)";
-          } else {
-            const sl = (trade && trade.stop_loss_target) ? trade.stop_loss_target : (combinedEntry * 1.01);
-            const tp = (trade && trade.take_profit_target) ? trade.take_profit_target : (combinedEntry * 0.98);
-            document.getElementById("riskTargetsVal").innerText = `SL: ${fmtUSD(sl)} | TP: ${fmtUSD(tp)}`;
-            document.getElementById("riskTargetsVal").style.color = "var(--text-main)";
+          // Calculate metrics for specific monitored strategy or combined portfolio
+          if (monitoredStrategyId !== "ALL") {
+            const focusedStrat = activeStrategies.find(s => s.strategy_id === monitoredStrategyId);
+            if (focusedStrat) {
+              const fEntry = parseFloat(focusedStrat.combined_entry_premium || 0.0);
+              const fBuyback = parseFloat(focusedStrat.current_buyback_premium || 0.0);
+              const fPnlUsd = parseFloat(focusedStrat.pnl_usd || 0.0);
+              const fPnlPct = parseFloat(focusedStrat.pnl_pct || 0.0);
+              const fLevel = focusedStrat.level || tradeLevel;
+
+              document.getElementById("combinedEntryVal").innerText = fmtUSD(fEntry);
+              document.getElementById("currentBuybackVal").innerText = fmtUSD(fBuyback);
+              updatePnlDisplay(fPnlPct, fPnlUsd, fLevel);
+
+              const strikeStr = focusedStrat.strike ? `$${Number(focusedStrat.strike).toLocaleString()}` : "";
+              document.getElementById("riskTargetsVal").innerText = `FOCUS: ${focusedStrat.name} (${focusedStrat.trade_size || 0.01} BTC | Strike: ${strikeStr})`;
+              document.getElementById("riskTargetsVal").style.color = "var(--primary)";
+
+              if (btnCloseFocused) {
+                btnCloseFocused.innerText = `Close Strategy (Both Legs)`;
+                btnCloseFocused.className = "btn btn-danger";
+              }
+
+              if (shockSlBtn) {
+                shockSlBtn.innerHTML = `⚡ Trigger +1.5% SL Shock (${strikeStr})`;
+                shockSlBtn.title = `Simulate +1.5% SL shock and close BOTH legs of ${focusedStrat.name}`;
+              }
+              if (shockTpBtn) {
+                shockTpBtn.innerHTML = `🎯 Trigger -2.5% TP Shock (${strikeStr})`;
+                shockTpBtn.title = `Simulate -2.5% TP shock and close BOTH legs of ${focusedStrat.name}`;
+              }
+            } else {
+              monitoredStrategyId = "ALL";
+            }
+          }
+
+          if (monitoredStrategyId === "ALL") {
+            let combinedEntry = 0.0;
+            let currentBuyback = 0.0;
+            let pnlUsd = 0.0;
+
+            if (activeStrategies.length > 0) {
+              combinedEntry = activeStrategies.reduce((acc, s) => acc + parseFloat(s.combined_entry_premium || 0), 0);
+              currentBuyback = activeStrategies.reduce((acc, s) => acc + parseFloat(s.current_buyback_premium || 0), 0);
+              pnlUsd = activeStrategies.reduce((acc, s) => acc + parseFloat(s.pnl_usd || 0), 0);
+            } else if (trade) {
+              combinedEntry = trade.combined_entry_premium || 0.0;
+              currentBuyback = trade.current_buyback_premium || 0.0;
+              pnlUsd = trade.pnl_usd || 0.0;
+            }
+            const pnlPct = combinedEntry > 0 ? ((combinedEntry - currentBuyback) / combinedEntry) * 100 : 0.0;
+
+            document.getElementById("combinedEntryVal").innerText = fmtUSD(combinedEntry);
+            document.getElementById("currentBuybackVal").innerText = fmtUSD(currentBuyback || combinedEntry);
+            updatePnlDisplay(pnlPct, pnlUsd, tradeLevel);
+
+            if (tradeLevel === 1) {
+              document.getElementById("riskTargetsVal").innerText = "MANUAL DECISION ONLY (NO AUTO SL/TP)";
+              document.getElementById("riskTargetsVal").style.color = "var(--primary)";
+            } else {
+              const sl = (trade && trade.stop_loss_target) ? trade.stop_loss_target : (combinedEntry * 1.01);
+              const tp = (trade && trade.take_profit_target) ? trade.take_profit_target : (combinedEntry * 0.98);
+              document.getElementById("riskTargetsVal").innerText = `SL: ${fmtUSD(sl)} | TP: ${fmtUSD(tp)}`;
+              document.getElementById("riskTargetsVal").style.color = "var(--text-main)";
+            }
+
+            if (btnCloseFocused) {
+              btnCloseFocused.innerText = "Close All Strategies (All Legs)";
+              btnCloseFocused.className = "btn btn-danger";
+            }
+
+            if (shockSlBtn) {
+              shockSlBtn.innerHTML = "⚡ Trigger +1.5% SL Shock";
+              shockSlBtn.title = "Simulates a +1.5% ask price surge to trigger automated Stop-Loss exit for all strategies";
+            }
+            if (shockTpBtn) {
+              shockTpBtn.innerHTML = "🎯 Trigger -2.5% TP Shock";
+              shockTpBtn.title = "Simulates a -2.5% ask price drop to trigger automated Take-Profit exit for all strategies";
+            }
           }
         } else {
+          monitoredStrategyId = "ALL";
+          if (multiOptionBar) multiOptionBar.style.display = "none";
+          if (shockSlBtn) shockSlBtn.disabled = true;
+          if (shockTpBtn) shockTpBtn.disabled = true;
           closeBtn.disabled = true;
           closeBtn.style.display = "none";
           execL1.disabled = false;
           execL2.disabled = false;
-          execL1.innerText = "Execute Level 1 (Naked Straddle)";
-          execL2.innerText = "Execute Level 2 (1% SL / 2% TP)";
+          updateExecutionNotice();
           const level1Banner = document.getElementById("level1ManualBanner");
           if (level1Banner) level1Banner.style.display = "none";
           const btnLevel1Close = document.getElementById("btnLevel1QuickClose");
@@ -2124,15 +2517,14 @@
 
           document.getElementById("combinedEntryVal").innerText = "$0.00";
           document.getElementById("currentBuybackVal").innerText = "$0.00";
-          updatePnlDisplay(0.0, 0.0, 2);
           document.getElementById("riskTargetsVal").innerText = "SL: $0.00 | TP: $0.00";
           document.getElementById("riskTargetsVal").style.color = "var(--text-main)";
+          updatePnlDisplay(0.0, 0.0, 2);
         }
 
-        // Render Positions directly from session if present
-        if (session.live_positions) {
-          renderPositions(session.live_positions);
-        }
+        // Render Strategies table and Bybit contract legs
+        renderStrategies(activeStrategies);
+        renderBybitLegs(livePositions);
 
         // Render Logs
         if (session.logs) {
@@ -2141,8 +2533,14 @@
       } catch (err) {}
     }
 
-    async function fetchOrders() {
+    let lastOrdersCount = -1;
+    let lastOrderFirstId = "";
+    async function fetchOrders(force = false) {
       try {
+        const ordersView = document.getElementById("ordersView");
+        const isOrdersVisible = ordersView && ordersView.style.display !== "none";
+        if (!isOrdersVisible && !force && lastOrdersCount >= 0) return;
+
         const res = await fetch("/api/orders");
         if (!res.ok) return;
         const orders = await res.json();
@@ -2151,8 +2549,15 @@
         if (countBadge) countBadge.innerText = orders ? orders.length : 0;
         if (!tbody) return;
 
+        const firstId = (orders && orders.length > 0) ? (orders[0].order_id || orders[0].contract) : "";
+        if (!force && orders && orders.length === lastOrdersCount && firstId === lastOrderFirstId) {
+          return; // Unchanged
+        }
+        lastOrdersCount = orders ? orders.length : 0;
+        lastOrderFirstId = firstId;
+
         if (!orders || orders.length === 0) {
-          tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--text-muted); padding: 1rem;">No orders submitted yet.</td></tr>`;
+          tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-muted); padding: 1rem;">No orders submitted yet.</td></tr>`;
           return;
         }
 
@@ -2160,7 +2565,8 @@
           let badgeClass = "badge-neutral";
           if (o.status === "FILLED") badgeClass = "badge-success";
           else if (o.status === "ACCEPTED" || o.status === "NEW") badgeClass = "badge-primary";
-          else if (o.status === "CANCELLED" || o.status === "REJECTED") badgeClass = "badge-danger";
+          else if (o.status === "CANCELED" || o.status === "CANCELLED" || o.status === "REJECTED") badgeClass = "badge-danger";
+          const cancelable = ["SUBMITTED", "ACCEPTED", "NEW", "PARTIALLY_FILLED", "PENDING_UPDATE"].includes(String(o.status || "").toUpperCase()) && o.order_id;
 
           return `
             <tr>
@@ -2171,73 +2577,338 @@
               <td class="font-mono">${o.filled_qty} BTC</td>
               <td class="font-mono">${fmtUSD(o.avg_price)}</td>
               <td><span class="badge ${badgeClass}">${o.status}</span></td>
+              <td>${cancelable ? `<button class="btn btn-danger btn-sm" onclick="cancelLiveOrder('${String(o.order_id).replace(/'/g, "\\'")}')">Cancel</button>` : "—"}</td>
             </tr>
           `;
         }).join("");
       } catch (err) {}
     }
 
-    function renderPositions(positions) {
+    async function cancelLiveOrder(orderId) {
+      if (!orderId) return;
+      try {
+        const response = await fetch(`/api/orders/${encodeURIComponent(orderId)}/cancel`, { method: "POST" });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.detail || result.message || "Cancel request failed");
+        showToast(`Cancellation requested through NautilusTrader for ${orderId}.`, "info");
+        await fetchOrders(true);
+      } catch (error) {
+        showToast(`Cancel failed: ${error.message || error}`, "error");
+      }
+    }
+
+    function renderStrategies(strategies) {
       const tbody = document.getElementById("positionsTableBody");
       const countBadge = document.getElementById("positionsCountVal");
-      if (countBadge) countBadge.innerText = positions ? positions.length : 0;
+      if (countBadge) countBadge.innerText = strategies ? strategies.length : 0;
       if (!tbody) return;
 
-      if (!positions || positions.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--text-muted); padding: 1rem;">No open positions confirmed on Bybit.</td></tr>`;
+      if (!strategies || strategies.length === 0) {
+        if (!tbody.dataset.emptyState) {
+          tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-muted); padding: 1rem;">No active straddle strategies running.</td></tr>`;
+          tbody.dataset.emptyState = "true";
+        }
+        return;
+      }
+      delete tbody.dataset.emptyState;
+
+      // In-place mutation check: if strategy count and IDs match existing rows, update cells directly in <0.05ms
+      const existingRows = tbody.querySelectorAll("tr[data-strat-id]");
+      const canMutateInPlace = existingRows.length === strategies.length &&
+        Array.from(existingRows).every((r, idx) => r.dataset.stratId === strategies[idx].strategy_id);
+
+      if (canMutateInPlace) {
+        strategies.forEach((s, idx) => {
+          const row = existingRows[idx];
+          const pnl = parseFloat(s.pnl_usd || 0.0);
+          const pnlPct = parseFloat(s.pnl_pct || 0.0);
+          const buyback = parseFloat(s.current_buyback_premium || 0.0);
+          const sign = pnl >= 0 ? "+" : "";
+          const pctSign = pnlPct >= 0 ? "+" : "";
+          const pnlColor = pnl >= 0 ? "var(--success)" : "var(--danger)";
+
+          const stratName = s.name || `Strategy #${strategies.length - idx}`;
+          const titleEl = row.querySelector(".strat-title");
+          if (titleEl && titleEl.innerText !== stratName) titleEl.innerText = stratName;
+
+          const entry = parseFloat(s.combined_entry_premium || 0.0);
+          const entryCell = row.querySelector(".strat-entry");
+          if (entryCell && entryCell.innerText !== fmtUSD(entry)) entryCell.innerText = fmtUSD(entry);
+
+          const qtyCell = row.querySelector(".strat-qty");
+          const expectedQty = `${s.trade_size || 0.01} BTC`;
+          if (qtyCell && qtyCell.innerText !== expectedQty) qtyCell.innerText = expectedQty;
+
+          const bbCell = row.querySelector(".strat-buyback");
+          if (bbCell && bbCell.innerText !== fmtUSD(buyback)) bbCell.innerText = fmtUSD(buyback);
+
+          const isUnverified = s.status === "RECONCILIATION_REQUIRED" || s.live_verified === false;
+          const syncBadge = row.querySelector(".reconcile-badge");
+          if (syncBadge) syncBadge.style.display = isUnverified ? "inline-flex" : "none";
+          const closeButton = row.querySelector(".btn-danger");
+          if (closeButton) {
+            closeButton.disabled = isUnverified;
+            closeButton.title = isUnverified
+              ? "Waiting for a live position snapshot before this entry can be closed"
+              : "Close BOTH legs (Call + Put) on Bybit";
+          }
+
+          const pnlCell = row.querySelector(".strat-pnl");
+          if (pnlCell) {
+            pnlCell.style.color = pnlColor;
+            const newPnlHtml = `${sign}${fmtUSD(pnl)} <span style="font-size: 0.72rem; opacity: 0.9;">(${pctSign}${pnlPct.toFixed(2)}%)</span>`;
+            if (pnlCell.innerHTML !== newPnlHtml) pnlCell.innerHTML = newPnlHtml;
+          }
+
+          const isFocused = (monitoredStrategyId === s.strategy_id);
+          row.style.background = isFocused ? "var(--primary-light)" : "";
+        });
         return;
       }
 
-      const hasCall = positions.some(p => p.symbol && p.symbol.includes("-C"));
-      const hasPut = positions.some(p => p.symbol && p.symbol.includes("-P"));
-      const isPartial = positions.length === 1 || (hasCall !== hasPut);
-
-      let warningRow = "";
-      if (isPartial) {
-        warningRow = `
-          <tr>
-            <td colspan="6" style="background: var(--warning-bg); color: var(--warning); font-weight: 600; text-align: center; padding: 0.35rem;">
-              ⚠️ PARTIAL STRADDLE — UNHEDGED EXPOSURE DETECTED
-            </td>
-          </tr>
-        `;
-      }
-
-      tbody.innerHTML = warningRow + positions.map(p => {
-        const pnl = parseFloat(p.unrealisedPnl || 0.0);
-        const avgPx = parseFloat(p.avgPrice || 0.0);
-        const markPx = parseFloat(p.markPrice || 0.0);
-        const legPct = avgPx > 0 ? ((avgPx - markPx) / avgPx) * 100 : 0.0;
-        const pnlColor = pnl >= 0 ? "var(--success)" : "var(--danger)";
+      // Full rebuild ONLY when strategy count or IDs change
+      tbody.innerHTML = strategies.map((s, idx) => {
+        const pnl = parseFloat(s.pnl_usd || 0.0);
+        const pnlPct = parseFloat(s.pnl_pct || 0.0);
+        const entry = parseFloat(s.combined_entry_premium || 0.0);
+        const buyback = parseFloat(s.current_buyback_premium || 0.0);
         const sign = pnl >= 0 ? "+" : "";
-        const pctSign = legPct >= 0 ? "+" : "";
+        const pctSign = pnlPct >= 0 ? "+" : "";
+        const pnlColor = pnl >= 0 ? "var(--success)" : "var(--danger)";
+        const isFocused = (monitoredStrategyId === s.strategy_id);
+        const rowBg = isFocused ? "background: var(--primary-light);" : "";
+        const timeStr = s.time_str || (s.started_at ? s.started_at.split(' ')[1] : "--");
+        const stratName = s.name || `Strategy #${strategies.length - idx}`;
+        const strikeStr = s.strike ? `$${Number(s.strike).toLocaleString()}` : "--";
+        const isUnverified = s.status === "RECONCILIATION_REQUIRED" || s.live_verified === false;
+
         return `
-          <tr>
-            <td class="font-mono" style="font-weight: 600;">${p.symbol}</td>
-            <td><span class="badge badge-danger">${p.side || "Sell"}</span></td>
-            <td class="font-mono">${p.size} BTC</td>
-            <td class="font-mono">${fmtUSD(p.avgPrice)}</td>
-            <td class="font-mono">${fmtUSD(p.markPrice)}</td>
-            <td class="font-mono" style="color: ${pnlColor}; font-weight: 700;">${sign}${fmtUSD(pnl)} <span style="font-size: 0.72rem; opacity: 0.9;">(${pctSign}${legPct.toFixed(2)}%)</span></td>
+          <tr id="strat-row-${s.strategy_id}" data-strat-id="${s.strategy_id}" style="${rowBg}">
+            <td class="font-mono" style="font-weight: 700; color: var(--primary);">
+              <span class="strat-title">${stratName}</span>
+              ${isFocused ? '<span class="badge badge-primary" style="margin-left: 0.35rem; font-size: 0.6rem;">FOCUSED</span>' : ''}
+              <span class="badge badge-warning reconcile-badge" style="margin-left: 0.35rem; font-size: 0.6rem; ${isUnverified ? "" : "display: none;"}">WAITING FOR LIVE POSITION SYNC</span>
+              <div style="font-size: 0.72rem; color: var(--text-muted); font-weight: normal;">Strike: ${strikeStr}</div>
+            </td>
+            <td class="font-mono" style="color: var(--text-muted);">${timeStr}</td>
+            <td class="font-mono" style="font-size: 0.73rem;">
+              <div style="color: var(--text-main); margin-bottom: 2px;">
+                <span class="badge badge-danger" style="font-size: 0.6rem; padding: 1px 4px; margin-right: 4px;">SELL</span>
+                ${s.call_symbol || "--"}
+              </div>
+              <div style="color: var(--text-main);">
+                <span class="badge badge-danger" style="font-size: 0.6rem; padding: 1px 4px; margin-right: 4px;">SELL</span>
+                ${s.put_symbol || "--"}
+              </div>
+            </td>
+            <td class="font-mono strat-qty">${s.trade_size || 0.01} BTC</td>
+            <td class="font-mono strat-entry">${fmtUSD(entry)}</td>
+            <td class="font-mono strat-buyback">${fmtUSD(buyback)}</td>
+            <td class="font-mono strat-pnl" style="color: ${pnlColor}; font-weight: 700;">
+              ${sign}${fmtUSD(pnl)}
+              <span style="font-size: 0.72rem; opacity: 0.9;">(${pctSign}${pnlPct.toFixed(2)}%)</span>
+            </td>
+            <td style="text-align: center; white-space: nowrap;">
+              <button class="btn btn-secondary" onclick="focusStrategy('${s.strategy_id}')" style="padding: 0.25rem 0.55rem; font-size: 0.68rem; display: inline-flex; margin-right: 0.35rem;" title="Focus and view profit for this strategy">
+                🎯 Focus
+              </button>
+              <button class="btn btn-danger" ${isUnverified ? "disabled" : ""} onclick="closeStrategyPrompt('${s.strategy_id}', '${stratName}')" style="padding: 0.25rem 0.55rem; font-size: 0.68rem; display: inline-flex;" title="${isUnverified ? "Waiting for a live position snapshot before this entry can be closed" : "Close BOTH legs (Call + Put) on Bybit"}">
+                ❌ Close Strategy (Both Legs)
+              </button>
+            </td>
           </tr>
         `;
       }).join("");
     }
 
-    async function fetchPositions() {
-      try {
-        const res = await fetch("/api/positions");
-        if (!res.ok) return;
-        const positions = await res.json();
-        renderPositions(positions);
-      } catch (err) {}
+    function renderPositions(positions) {
+      renderStrategies(cachedActiveStrategies);
+      renderBybitLegs(cachedLivePositions || positions);
+      const stratsCount = cachedActiveStrategies ? cachedActiveStrategies.length : 0;
+      const legsCount = (cachedLivePositions && cachedLivePositions.length) ? cachedLivePositions.length : (positions ? positions.length : 0);
+      const syncEl = document.getElementById("headerSyncText");
+      if (syncEl) {
+        syncEl.innerText = `STRADDLES: ${stratsCount} | BYBIT LEGS: ${legsCount}`;
+      }
     }
 
+    function renderBybitLegs(positions) {
+      const tbody = document.getElementById("legsTableBody");
+      const countBadge = document.getElementById("legsCountVal");
+      const summaryText = document.getElementById("bybitLegsSummary");
+
+      let effectivePositions = (positions && positions.length > 0) ? positions : [];
+      if (effectivePositions.length === 0 && cachedActiveStrategies && cachedActiveStrategies.length > 0) {
+        effectivePositions = [];
+        cachedActiveStrategies.forEach(s => {
+          if (s.call_symbol && s.status !== "CLOSED") {
+            const callAsk = parseFloat(s.call_ask || s.call_entry || 0);
+            const callEntry = parseFloat(s.call_entry || 0);
+            const callPnl = (callEntry - callAsk) * parseFloat(s.trade_size || 0.01);
+            effectivePositions.push({
+              symbol: s.call_symbol,
+              side: "Short",
+              size: String(s.trade_size || 0.01),
+              avgPrice: callEntry.toFixed(2),
+              markPrice: callAsk.toFixed(2),
+              unrealisedPnl: callPnl.toFixed(4),
+              strategy_id: s.strategy_id,
+            });
+          }
+          if (s.put_symbol && s.status !== "CLOSED") {
+            const putAsk = parseFloat(s.put_ask || s.put_entry || 0);
+            const putEntry = parseFloat(s.put_entry || 0);
+            const putPnl = (putEntry - putAsk) * parseFloat(s.trade_size || 0.01);
+            effectivePositions.push({
+              symbol: s.put_symbol,
+              side: "Short",
+              size: String(s.trade_size || 0.01),
+              avgPrice: putEntry.toFixed(2),
+              markPrice: putAsk.toFixed(2),
+              unrealisedPnl: putPnl.toFixed(4),
+              strategy_id: s.strategy_id,
+            });
+          }
+        });
+      }
+
+      const numLegs = effectivePositions.length;
+      if (countBadge) countBadge.innerText = numLegs;
+      if (summaryText) summaryText.innerText = `${numLegs} Legs Open on Bybit`;
+      if (!tbody) return;
+
+      if (numLegs === 0) {
+        tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-muted); padding: 1rem;">No open contract positions on Bybit.</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = effectivePositions.map(p => {
+        const pnl = parseFloat(p.unrealisedPnl || 0.0);
+        const sign = pnl >= 0 ? "+" : "";
+        const pnlColor = pnl >= 0 ? "var(--success)" : "var(--danger)";
+        const isCall = p.symbol.includes("-C-") || p.symbol.endsWith("-C");
+        const typeBadge = isCall 
+          ? `<span class="badge badge-success" style="font-size: 0.65rem;">CALL</span>`
+          : `<span class="badge badge-danger" style="font-size: 0.65rem;">PUT</span>`;
+        return `
+          <tr>
+            <td style="font-family: 'JetBrains Mono', monospace; font-weight: 700;">${p.symbol}</td>
+            <td>${typeBadge}</td>
+            <td><span class="badge badge-neutral" style="font-size: 0.65rem;">${p.side || 'SELL'}</span></td>
+            <td style="font-family: 'JetBrains Mono', monospace; font-weight: 600;">${p.size} BTC</td>
+            <td style="font-family: 'JetBrains Mono', monospace;">$${parseFloat(p.avgPrice || 0.0).toFixed(2)}</td>
+            <td style="font-family: 'JetBrains Mono', monospace;">$${parseFloat(p.markPrice || 0.0).toFixed(2)}</td>
+            <td style="font-family: 'JetBrains Mono', monospace; font-weight: 700; color: ${pnlColor};">${sign}$${pnl.toFixed(4)}</td>
+            <td style="text-align: center;">
+              <button class="btn btn-secondary" onclick="closeSpecificStrategy('${p.strategy_id || p.symbol}')" style="padding: 0.2rem 0.55rem; font-size: 0.68rem; color: var(--danger); border-color: var(--danger-border);" title="Closes both legs of the straddle containing this contract">
+                Close Straddle
+              </button>
+            </td>
+          </tr>
+        `;
+      }).join("");
+    }
+
+    function onMonitoredStrategyChanged(val) {
+      monitoredStrategyId = val;
+      fetchSessionState();
+    }
+
+    function focusStrategy(stratId) {
+      monitoredStrategyId = stratId;
+      const selectEl = document.getElementById("monitoredStrategySelect");
+      if (selectEl) selectEl.value = stratId;
+      fetchSessionState();
+      const monitorBox = document.getElementById("activeMonitorBox");
+      if (monitorBox) monitorBox.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+
+    // Backward compatibility aliases
+    function onMonitoredOptionChanged(val) { onMonitoredStrategyChanged(val); }
+    function focusPosition(symbol) {
+      const strat = cachedActiveStrategies.find(s => s.call_symbol === symbol || s.put_symbol === symbol || s.strategy_id === symbol);
+      if (strat) focusStrategy(strat.strategy_id);
+    }
+
+    async function closeFocusedStrategy() {
+      if (!hasActivePositions) return;
+      if (monitoredStrategyId === "ALL") {
+        if (confirm("Are you sure you want to close ALL active straddle strategies (all legs)?")) {
+          await stopStraddle();
+        }
+      } else {
+        const strat = (cachedActiveStrategies || []).find(s => s.strategy_id === monitoredStrategyId);
+        const name = strat ? strat.name : monitoredStrategyId;
+        if (confirm(`Are you sure you want to close BOTH LEGS of ${name}?`)) {
+          await closeStrategy(monitoredStrategyId);
+        }
+      }
+    }
+
+    async function closeStrategyPrompt(strategyId, stratName) {
+      if (confirm(`Are you sure you want to close BOTH LEGS (Call + Put) of ${stratName}?`)) {
+        await closeStrategy(strategyId);
+      }
+    }
+
+    async function closeStrategy(strategyId) {
+      const btnCloseFocused = document.getElementById("btnCloseFocusedBtn");
+      const origText = btnCloseFocused ? btnCloseFocused.innerText : "";
+      if (btnCloseFocused) {
+        btnCloseFocused.disabled = true;
+        btnCloseFocused.innerText = "Closing Strategy (Both Legs)...";
+      }
+
+      try {
+        const res = await fetch("/api/straddle/close-strategy", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ strategy_id: strategyId })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          if (monitoredStrategyId === strategyId) {
+            monitoredStrategyId = "ALL";
+          }
+          await new Promise(r => setTimeout(r, 400));
+          await syncAllState();
+        } else {
+          alert(`Error closing strategy: ${data.detail || data.message || "Failed"}`);
+        }
+      } catch (err) {
+        alert(`Network error: ${err}`);
+      } finally {
+        if (btnCloseFocused) {
+          btnCloseFocused.disabled = false;
+          btnCloseFocused.innerText = origText;
+        }
+      }
+    }
+
+    // Backward compatibility aliases
+    async function closeFocusedOption() { await closeFocusedStrategy(); }
+    async function closeSinglePositionPrompt(symbol) {
+      const strat = cachedActiveStrategies.find(s => s.call_symbol === symbol || s.put_symbol === symbol || s.strategy_id === symbol);
+      if (strat) {
+        await closeStrategyPrompt(strat.strategy_id, strat.name);
+      } else {
+        await closeStrategy(symbol);
+      }
+    }
+    async function closeSpecificPosition(symbol) {
+      await closeStrategy(symbol);
+    }
+
+    async function fetchPositions() {
+      await fetchSessionState();
+    }
+
+    let lastRenderedLogsCount = -1;
+    let lastRenderedLogsMsg = "";
     function renderLogs(logs) {
       const tbody = document.getElementById("logsTableBody");
       if (!tbody) return;
 
-      // Provide baseline events if empty so UI is never blank
       let displayLogs = logs;
       if (!displayLogs || displayLogs.length === 0) {
         displayLogs = [
@@ -2245,6 +2916,13 @@
           { time: "SYS", category: "DISCOVERY", message: "Discovered active BTC option contracts and computed ATM strike.", badge_type: "info" }
         ];
       }
+
+      const newestMsg = displayLogs.length > 0 ? displayLogs[displayLogs.length - 1].message : "";
+      if (displayLogs.length === lastRenderedLogsCount && newestMsg === lastRenderedLogsMsg) {
+        return; // Fast path: avoid re-parsing table HTML
+      }
+      lastRenderedLogsCount = displayLogs.length;
+      lastRenderedLogsMsg = newestMsg;
 
       tbody.innerHTML = displayLogs.slice().reverse().map(l => {
         let badgeClass = "badge-primary";
@@ -2270,23 +2948,70 @@
       } catch (err) {}
     }
 
+    function showToast(message, type = "info") {
+      const existing = document.getElementById("appToast");
+      if (existing) existing.remove();
+      const toast = document.createElement("div");
+      toast.id = "appToast";
+      toast.style.position = "fixed";
+      toast.style.bottom = "24px";
+      toast.style.right = "24px";
+      toast.style.padding = "0.75rem 1.25rem";
+      toast.style.borderRadius = "8px";
+      toast.style.fontSize = "0.8rem";
+      toast.style.fontWeight = "700";
+      toast.style.zIndex = "99999";
+      toast.style.boxShadow = "0 10px 30px rgba(0,0,0,0.4)";
+      toast.style.display = "flex";
+      toast.style.alignItems = "center";
+      toast.style.gap = "0.6rem";
+      toast.style.border = "1px solid var(--border)";
+      if (type === "success") {
+        toast.style.background = "#059669";
+        toast.style.color = "#FFFFFF";
+      } else if (type === "error") {
+        toast.style.background = "#DC2626";
+        toast.style.color = "#FFFFFF";
+      } else {
+        toast.style.background = "var(--secondary-bg)";
+        toast.style.color = "var(--text-main)";
+      }
+      toast.innerText = message;
+      document.body.appendChild(toast);
+      setTimeout(() => { if (toast.parentNode) toast.remove(); }, 4000);
+    }
+
     function switchTab(tab) {
       const ordersBtn = document.getElementById("tabOrdersBtn");
       const posBtn = document.getElementById("tabPositionsBtn");
+      const legsBtn = document.getElementById("tabLegsBtn");
       const ordersView = document.getElementById("ordersView");
       const posView = document.getElementById("positionsView");
+      const legsView = document.getElementById("legsView");
 
       if (tab === "orders") {
-        ordersBtn.className = "tab-btn active";
-        posBtn.className = "tab-btn";
-        ordersView.style.display = "block";
-        posView.style.display = "none";
-        fetchOrders();
+        if (ordersBtn) ordersBtn.className = "tab-btn active";
+        if (posBtn) posBtn.className = "tab-btn";
+        if (legsBtn) legsBtn.className = "tab-btn";
+        if (ordersView) ordersView.style.display = "block";
+        if (posView) posView.style.display = "none";
+        if (legsView) legsView.style.display = "none";
+        fetchOrders(true);
+      } else if (tab === "legs") {
+        if (ordersBtn) ordersBtn.className = "tab-btn";
+        if (posBtn) posBtn.className = "tab-btn";
+        if (legsBtn) legsBtn.className = "tab-btn active";
+        if (ordersView) ordersView.style.display = "none";
+        if (posView) posView.style.display = "none";
+        if (legsView) legsView.style.display = "block";
+        renderBybitLegs(cachedLivePositions);
       } else {
-        ordersBtn.className = "tab-btn";
-        posBtn.className = "tab-btn active";
-        ordersView.style.display = "none";
-        posView.style.display = "block";
+        if (ordersBtn) ordersBtn.className = "tab-btn";
+        if (posBtn) posBtn.className = "tab-btn active";
+        if (legsBtn) legsBtn.className = "tab-btn";
+        if (ordersView) ordersView.style.display = "none";
+        if (posView) posView.style.display = "block";
+        if (legsView) legsView.style.display = "none";
         fetchPositions();
       }
     }
@@ -2334,25 +3059,76 @@
           const msg = JSON.parse(event.data);
           if (msg.type === "VALUATION_UPDATE") {
             if (!hasActivePositions) return;
-            const pnlPct = parseFloat(msg.pnl_pct || 0);
-            const pnlUsd = parseFloat(msg.pnl_usd || 0);
-            updatePnlDisplay(pnlPct, pnlUsd, currentStrategyLevel);
-            const buyback = msg.current_buyback_premium || msg.buyback_premium;
-            if (buyback) {
-              const buybackEl = document.getElementById("currentBuybackVal");
-              if (buybackEl) buybackEl.innerText = fmtUSD(buyback);
+            if (msg.active_strategies) {
+              cachedActiveStrategies = msg.active_strategies;
+              renderStrategies(cachedActiveStrategies);
+              renderBybitLegs(cachedLivePositions);
+            }
+            if (monitoredStrategyId === "ALL") {
+              const pnlPct = parseFloat(msg.pnl_pct || 0);
+              const pnlUsd = parseFloat(msg.pnl_usd || 0);
+              updatePnlDisplay(pnlPct, pnlUsd, currentStrategyLevel);
+              const buyback = msg.current_buyback_premium || msg.buyback_premium;
+              if (buyback) {
+                const buybackEl = document.getElementById("currentBuybackVal");
+                if (buybackEl) buybackEl.innerText = fmtUSD(buyback);
+              }
+            } else {
+              const focusedStrat = (cachedActiveStrategies || []).find(s => s.strategy_id === monitoredStrategyId);
+              if (focusedStrat) {
+                const pnlPct = parseFloat(focusedStrat.pnl_pct || 0);
+                const pnlUsd = parseFloat(focusedStrat.pnl_usd || 0);
+                updatePnlDisplay(pnlPct, pnlUsd, focusedStrat.level || currentStrategyLevel);
+                const buybackEl = document.getElementById("currentBuybackVal");
+                if (buybackEl) buybackEl.innerText = fmtUSD(focusedStrat.current_buyback_premium);
+              }
             }
           } else {
             if (msg.type === "STOP_LOSS_TRIGGERED" || msg.type === "TAKE_PROFIT_TRIGGERED" || msg.type === "MANUAL_STOP" || msg.type === "STRATEGY_STOPPED") {
+              if (msg.all_closed === false) {
+                if (monitoredStrategyId === msg.strategy_id) {
+                  monitoredStrategyId = "ALL";
+                }
+                fetchSessionState();
+                fetchOrders();
+                return;
+              }
+
               hasActivePositions = false;
-              updatePnlDisplay(0.0, 0.0, 2);
+              const stateBadge = document.getElementById("strategyStateBadge");
+              if (stateBadge) {
+                stateBadge.innerText = "CLOSED";
+                stateBadge.className = "badge badge-neutral";
+              }
+              const closeBtn = document.getElementById("btnCloseAllBtn");
+              if (closeBtn) {
+                closeBtn.disabled = true;
+                closeBtn.style.display = "none";
+              }
+              const level1Banner = document.getElementById("level1ManualBanner");
+              if (level1Banner) level1Banner.style.display = "none";
+              const btnLevel1Close = document.getElementById("btnLevel1QuickClose");
+              if (btnLevel1Close) btnLevel1Close.style.display = "none";
+
+              const shockSlBtn = document.querySelector(".btn-shock-sl");
+              const shockTpBtn = document.querySelector(".btn-shock-tp");
+              if (shockSlBtn) shockSlBtn.disabled = true;
+              if (shockTpBtn) shockTpBtn.disabled = true;
+
               const entryEl = document.getElementById("combinedEntryVal");
               if (entryEl) entryEl.innerText = "$0.00";
               const buybackEl = document.getElementById("currentBuybackVal");
               if (buybackEl) buybackEl.innerText = "$0.00";
+              const riskEl = document.getElementById("riskTargetsVal");
+              if (riskEl) {
+                riskEl.innerText = "SL: $0.00 | TP: $0.00";
+                riskEl.style.color = "var(--text-main)";
+              }
+
+              updatePnlDisplay(0.0, 0.0, 2);
+              renderStrategies([]);
             }
             fetchSessionState();
-            fetchPositions();
             fetchOrders();
           }
         } catch (e) {}

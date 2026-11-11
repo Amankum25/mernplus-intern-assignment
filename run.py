@@ -13,6 +13,7 @@ import argparse
 import os
 import subprocess
 import sys
+import tempfile
 import time
 import webbrowser
 from dotenv import load_dotenv
@@ -31,14 +32,20 @@ if os.path.exists(VENV_PYTHON) and sys.executable.lower() != os.path.abspath(VEN
 
 
 def run_tests() -> bool:
-    """Runs the 5-point unit test suite and reports status."""
+    """Runs the unit test suite with isolated state and no exchange credentials."""
     print("\n" + "=" * 70)
     print("  [STEP 1/3] RUNNING UNIT TEST SUITE")
     print("=" * 70)
     cmd = [sys.executable, "-m", "pytest", "tests/test_straddle.py", "-v", "--no-header"]
-    res = subprocess.run(cmd)
+    test_env = os.environ.copy()
+    test_env["STRADDLE_STATE_FILE"] = os.path.join(
+        tempfile.gettempdir(), f"nautilus_straddle_runner_{os.getpid()}_{time.time_ns()}.json"
+    )
+    test_env["BYBIT_API_KEY"] = ""
+    test_env["BYBIT_API_SECRET"] = ""
+    res = subprocess.run(cmd, env=test_env)
     if res.returncode == 0:
-        print("  -> ALL 5 UNIT TESTS PASSED SUCCESSFULLY! [OK]\n")
+        print("  -> ALL UNIT TESTS PASSED SUCCESSFULLY! [OK]\n")
         return True
     else:
         print("  -> TEST FAILURE DETECTED. Review errors above.\n")
@@ -59,13 +66,58 @@ def show_market_check(env: str = "DEMO") -> None:
         print(f"  Target Expiry        : {overview['expiry_str']}")
         print(f"  Selected Call Leg    : {overview['call_contract']['symbol']}")
         print(f"  Selected Put Leg     : {overview['put_contract']['symbol']}")
-        print("  -> Live Market Connection: ACTIVE [OK]\n")
+        if overview.get("pair_validated"):
+            print("  -> NautilusTrader market adapter: connected; both legs have live quotes [OK]\n")
+        else:
+            print("  -> NautilusTrader market adapter returned contracts without two-sided quotes; order entry is disabled.\n")
     except Exception as e:
         print(f"  -> Market query notice: {e}\n")
 
 
+def free_tcp_port(port: int) -> None:
+    """Free a TCP port if it's already bound by an old orphaned process."""
+    if os.name == "nt":
+        try:
+            result = subprocess.run(
+                ["netstat", "-ano", "-p", "tcp"],
+                capture_output=True,
+                text=True,
+                check=False,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            if result.returncode == 0:
+                pids = set()
+                for line in result.stdout.splitlines():
+                    fields = line.split()
+                    if len(fields) >= 5 and fields[0].upper() == "TCP":
+                        local_endpoint = fields[1]
+                        state = fields[-2].upper()
+                        pid_text = fields[-1]
+                        if state == "LISTENING" and local_endpoint.rsplit(":", 1)[-1] == str(port):
+                            try:
+                                pid = int(pid_text)
+                                if pid != os.getpid():
+                                    pids.add(pid)
+                            except ValueError:
+                                pass
+                for pid in pids:
+                    print(f"Stopping lingering process {pid} on port {port}...")
+                    subprocess.run(
+                        ["taskkill", "/PID", str(pid), "/T", "/F"],
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                    )
+                if pids:
+                    time.sleep(1.0)
+        except Exception as e:
+            print(f"Notice during port cleanup: {e}")
+
+
 def launch_dashboard(port: int = 8000, host: str = "127.0.0.1", env: str = "DEMO") -> None:
     """Starts the FastAPI Uvicorn server and opens browser."""
+    free_tcp_port(port)
     print("=" * 70)
     print("  [STEP 3/3] LAUNCHING WEB DASHBOARD")
     print("=" * 70)
@@ -133,8 +185,8 @@ def main():
 
     # Default Mode: The complete all-in-one experience!
     # 1. Run unit tests to verify system health
-    # 2. Query Bybit market price & ATM contracts
-    # 3. Boot web dashboard and open browser
+    # 2. Boot web dashboard and open browser. Market discovery starts after
+    # FastAPI has an active loop for NautilusTrader's native adapter.
     print("\n" + "#" * 70)
     print("   BTC OPTIONS SHORT STRADDLE — ALL-IN-ONE SYSTEM LAUNCHER")
     print("#" * 70)
@@ -144,7 +196,7 @@ def main():
         print("Tests failed. Do you still want to start the dashboard? (Ctrl+C to abort)")
         time.sleep(2)
 
-    show_market_check(env=args.env)
+    print("\n[STEP 2/3] NautilusTrader market discovery will start with the dashboard.\n")
     launch_dashboard(port=args.port, host=args.host, env=args.env)
 
 

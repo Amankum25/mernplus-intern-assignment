@@ -1,11 +1,23 @@
 """
-Official NautilusTrader BTC Options Straddle Live Runner.
+================================================================================
+⚡ NAUTILUSTRADER BTC SHORT STRADDLE — STANDALONE LIVE RUNNER (run_straddle.py)
+================================================================================
+Production CLI launcher that runs the BTC Options Short Straddle directly on
+NautilusTrader's native TradingNode without requiring the FastAPI web server.
 
-Uses native NautilusTrader TradingNode, BybitDataClient, and BybitExecutionClient
-adapters to trade an automated ATM Bitcoin Short Straddle on Bybit Testnet/Demo/Mainnet.
-
-Usage:
-    python run_straddle.py --level 2 --qty 0.01 --env TESTNET
+Standard Interview Question Answered Here:
+"How does NautilusTrader start and initialize?"
+1. Discovery: Evaluates spot price and active listed options to resolve nearest ATM strike.
+2. Configuration: Assembles `TradingNodeConfig` with Bybit Data and Execution client configs.
+3. Subsystems Assembly:
+   - Registers adapter factories (`BybitLiveDataClientFactory`, `BybitLiveExecClientFactory`).
+   - Calling `node.build()` instantiates the MessageBus, LiveDataEngine, LiveExecEngine,
+     LiveRiskEngine, Cache, and Portfolio.
+4. Strategy Registration & Run:
+   - `node.trader.add_strategy(strategy)` connects strategy hooks.
+   - Calling `node.run()` starts the asyncio loop, performs venue reconciliation,
+     and fires the strategy's `on_start()` lifecycle callback.
+================================================================================
 """
 
 import argparse
@@ -23,8 +35,6 @@ from nautilus_trader.adapters.bybit import (
 from nautilus_trader.adapters.bybit.factories import (
     BybitLiveDataClientFactory,
     BybitLiveExecClientFactory,
-    get_cached_bybit_http_client,
-    get_cached_bybit_instrument_provider,
 )
 from nautilus_trader.config import TradingNodeConfig
 from nautilus_trader.live.node import TradingNode
@@ -65,7 +75,7 @@ def main():
 
     # 1. Discover current BTC Spot price & nearest ATM Call/Put contracts
     print("[1/4] Discovering live BTC options chain and nearest ATM strike...")
-    selector = BybitStrikeSelector()
+    selector = BybitStrikeSelector(args.env, api_key, api_secret)
     pair = selector.select_atm_straddle()
 
     print(f"      -> Current BTC Spot Price: ${pair.btc_price:,.2f}")
@@ -111,14 +121,6 @@ def main():
     # 3. Build Node (initializes internal engines and adapter handshakes)
     print("[3/4] Building TradingNode (reconciling cache, order emulator & venue)...")
     node.build()
-
-    # Pre-populate selected option instruments into cache
-    client = get_cached_bybit_http_client(environment=bybit_env, api_key=api_key, api_secret=api_secret)
-    provider = get_cached_bybit_instrument_provider(client=client, product_types=(BybitProductType.OPTION,))
-    provider.load_all()
-    for inst in provider.list_all():
-        if inst.id in (call_id, put_id):
-            node.cache.add_instrument(inst)
 
     # 4. Instantiate strategy and add to Trader
     strategy_config = BTCShortStraddleConfig(

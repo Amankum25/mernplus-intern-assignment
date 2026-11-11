@@ -1,7 +1,6 @@
 nautilus_trader>=1.231.0
 fastapi>=0.115.0
 uvicorn>=0.30.0
-requests>=2.32.0
 python-dotenv>=1.0.0
 pytest>=8.0.0
 

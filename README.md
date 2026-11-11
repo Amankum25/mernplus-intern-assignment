@@ -140,9 +140,9 @@ flowchart TD
 
 ### Level 1 — Naked BTC Short Straddle
 
-- **Dynamic Contract Discovery**: Queries Bybit for the latest BTC underlying reference price and evaluates active option contracts across the nearest delivery expiry.
+- **Dynamic Contract Discovery**: Uses NautilusTrader's native Bybit adapter for the BTC reference price and active option instruments across the nearest delivery expiry.
 - **ATM Resolution**: Selects the strike with minimal absolute distance $|\text{Strike} - S_{\text{ref}}|$, ensuring identical strike and expiry for both legs.
-- **Simultaneous Market Entry**: Submits synchronized Sell market orders for both Call and Put legs via Bybit's `/v5/order/create` endpoint.
+- **Paired Market Entry**: Creates both Sell market orders with the NautilusTrader order factory and submits them through the strategy and ExecutionEngine. The native venue adapter handles exchange transport.
 - **Manual Decision Mode**: Automated SL/TP is disabled. The operator observes real-time profit percentages and uses the dynamic **`Close & Lock In Profit (+X.XX%)`** button to exit at discretion.
 
 ### Level 2 — Automated Risk Management (1% SL / 2% TP)
@@ -171,12 +171,11 @@ The 1% SL and 2% TP bounds automatically adapt to the new blended baseline witho
 
 | Challenge | Root Cause | Engineering Solution |
 | :--- | :--- | :--- |
-| **Timestamp Rejections (`retCode: 10002`)** | Bybit rejects orders if request timestamp is $> 1,000\text{ ms}$ ahead of server time. Local machine clock drift caused premature rejections. | Implemented latency-compensated clock sync in `BybitV5Client._sync_time()` measuring network Round-Trip Time (RTT) with a 500ms safety buffer, widened `recv_window` to 20,000ms, and added automatic resync retry. |
-| **Invalid Option Parameter (`retCode: 10001`)** | In Bybit V5 `/v5/order/create`, `"orderFilter": "Order"` is only valid for Spot trading; passing it to Options causes immediate rejection. | Sanitized payload construction in `bybit_client.py` to omit `orderFilter` for `category: "option"`. |
-| **Missing Exchange Orders in UI** | Local audit logs only preserved trades executed in the current session; restarted sessions omitted past orders. | Built unified `/api/orders` endpoint querying Bybit's `/v5/order/history?category=option&baseCoin=BTC` with HMAC-SHA256 query signing, merging live exchange fills with local audit records (100+ orders displayed). |
+| **Timestamp or Exchange Validation Rejections** | The exchange can reject orders for venue-specific validation, market, or credential conditions. | Orders and rejection events are handled through NautilusTrader's native Bybit execution adapter; the dashboard displays the adapter's order status and callback details. |
+| **Missing Order History After Restart** | In-memory cache history is lost when a process exits. | The application persists actual Nautilus order IDs and fill callbacks; when running, it merges that audit history with orders in NautilusTrader's cache. It does not query Bybit through a separate client. |
 | **Legging Failure & Asymmetric Fills** | In illiquid markets, one leg may fill while the second remains pending, creating unhedged delta exposure. | If the second leg is unfilled after a configurable timeout (default 10s), the system cancels the pending leg and immediately unwinds the filled leg via market buyback. |
-| **Server Crash Recovery** | Unexpected server restart while positions are open leaves options unmonitored. | On startup, `reconcile_positions()` queries `/v5/position/list`, reconstructs the `StraddlePair`, detects entry prices, and seamlessly re-engages the risk monitoring loop. |
-| **Emergency Residual Sweep** | Stopping a strategy must guarantee zero leftover short inventory. | On manual operator stop, the engine executes an emergency sweep querying Bybit for any lingering open contracts and submits immediate `reduce_only=True` market buybacks. |
+| **Server Crash Recovery** | The in-memory cache is recreated when a process restarts. | On startup, the app loads the saved entry-to-position mapping and reconciles it against NautilusTrader's live cache. An empty or incomplete cache never clears saved entries or triggers a blind close. |
+| **Specific Entry Close** | Bybit nets contracts at the venue, so symbol-only closes can affect multiple entries. | The strategy closes the selected Nautilus virtual positions by their position IDs through the ExecutionEngine. |
 
 ---
 
@@ -190,7 +189,7 @@ The user interface takes direct visual inspiration from modern developer workspa
 - **High-Contrast Input Controls**: Order sizing and quick-preset buttons (`0.01`, `0.02`, `0.05`, `0.10 BTC`) are styled with custom themed surfaces, ensuring crisp legibility under both modes.
 - **Consistent Execution CTAs**: Both Level 1 and Level 2 buttons share identical geometry, typography, and glowing hover states.
 - **macOS Window Controls on Telemetry**: The log card features macOS-styled window dots (`#FF5F56`, `#FFBD2E`, `#27C93F`) and a monospace execution stream.
-- **Unified Order History**: Displays 100+ executed orders directly fetched from Bybit V5 Options history.
+- **Unified Order History**: Displays persisted NautilusTrader order/fill events together with the live Nautilus cache.
 
 ---
 

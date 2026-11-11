@@ -1,14 +1,33 @@
 """
-FastAPI server that powers the web dashboard.
-Exposes REST endpoints to control the strategy and a WebSocket endpoint
-to stream live events to the browser in real time.
+================================================================================
+⚡ FASTAPI REAL-TIME DASHBOARD SERVER (web/app.py)
+================================================================================
+Powers the interactive command terminal and real-time options telemetry feed.
+
+Architecture & Interview Notes:
+1. RESTful Control Endpoints:
+   - `/api/market`: Fetches live BTC price, available options expiry dates, ATM strike,
+     and top-of-book bid/ask quotes via NautilusTrader's Bybit adapter.
+   - `/api/straddle/start`: Submits Level 1 (naked) or Level 2 (1% SL / 2% TP) straddle orders.
+   - `/api/straddle/stop` & `/api/straddle/close-strategy`: Closes mapped Nautilus position IDs.
+   - `/api/orders`: Returns live Nautilus cache orders merged with durable audit logs.
+   - `/api/positions`: Exposes 100% verified positions directly from NautilusTrader's live cache.
+2. Real-Time Streaming:
+   - WebSocket `/ws/stream`: Delivers sub-second event broadcasts (ticks, fills, risk triggers)
+     directly to the browser without requiring aggressive client-side polling.
+3. Separation of Concerns:
+   - Endpoints do NOT connect directly to Bybit; they delegate all trading and data queries
+     to `StraddleExecutionManager`, preserving single-point-of-truth and thread safety.
+================================================================================
 """
 
 import asyncio
 import datetime
 from decimal import Decimal
 import json
+import logging
 import os
+import time
 from typing import Any, Dict, List, Optional
 from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
@@ -19,8 +38,10 @@ from pydantic import BaseModel
 
 load_dotenv()
 
+logger = logging.getLogger(__name__)
+
 from straddle.execution_manager import StraddleExecutionManager
-from straddle.strike_selector import BybitStrikeSelector
+from straddle.persistence import state_persistence
 
 # Lightweight in-memory session state
 session_state: Dict[str, Any] = {
@@ -30,13 +51,13 @@ session_state: Dict[str, Any] = {
         {
             "time": datetime.datetime.now().strftime("%H:%M:%S"),
             "category": "ENGINE",
-            "message": "NautilusTrader TradingNode initialized & connected to Bybit.",
+            "message": "Dashboard ready; NautilusTrader connection starts with live strategy initialization.",
             "badge_type": "info",
         },
         {
             "time": datetime.datetime.now().strftime("%H:%M:%S"),
             "category": "DISCOVERY",
-            "message": "Discovered active BTC option contracts and computed ATM strike.",
+            "message": "Market discovery is provided by NautilusTrader's native Bybit adapter.",
             "badge_type": "info",
         },
     ],
@@ -82,8 +103,8 @@ def _update_session_from_event(event: Dict[str, Any]) -> None:
         put_px = event.get("put_price", 0.0)
         qty = event.get("qty", 0.01)
 
-        call_sym = str(manager.active_strategy.call_instrument_id).split("-OPTION")[0] if manager.active_strategy else "CALL"
-        put_sym = str(manager.active_strategy.put_instrument_id).split("-OPTION")[0] if manager.active_strategy else "PUT"
+        call_sym = str(event.get("call_symbol") or "CALL")
+        put_sym = str(event.get("put_symbol") or "PUT")
 
         session_state["active_trade"] = {
             "level": manager.active_strategy.config.level if manager.active_strategy else 2,
@@ -99,27 +120,6 @@ def _update_session_from_event(event: Dict[str, Any]) -> None:
             "trade_size": qty,
         }
 
-        session_state["orders"] = [
-            {
-                "time": now_str,
-                "contract": call_sym,
-                "side": "SELL",
-                "qty": qty,
-                "filled_qty": qty,
-                "avg_price": call_px,
-                "status": "FILLED",
-            },
-            {
-                "time": now_str,
-                "contract": put_sym,
-                "side": "SELL",
-                "qty": qty,
-                "filled_qty": qty,
-                "avg_price": put_px,
-                "status": "FILLED",
-            },
-        ]
-
         session_state["logs"].append({
             "time": now_str,
             "category": "FILL",
@@ -134,36 +134,10 @@ def _update_session_from_event(event: Dict[str, Any]) -> None:
             session_state["active_trade"]["pnl_usd"] = event.get("pnl_usd", 0.0)
 
     elif evt_type in ("STOP_LOSS_TRIGGERED", "TAKE_PROFIT_TRIGGERED", "MANUAL_STOP", "STRATEGY_STOPPED"):
-        manager.is_running = False
-        manager.latest_telemetry["status"] = "CLOSED"
         buyback = event.get("buyback_premium", 0.0)
         pnl = event.get("pnl_pct", 0.0)
-        call_sym = str(manager.active_strategy.call_instrument_id).split("-OPTION")[0] if manager.active_strategy else "CALL"
-        put_sym = str(manager.active_strategy.put_instrument_id).split("-OPTION")[0] if manager.active_strategy else "PUT"
-        qty = float(manager.active_strategy.config.trade_size) if manager.active_strategy else 0.01
-
-        session_state["active_trade"] = None
-
-        session_state["orders"].extend([
-            {
-                "time": now_str,
-                "contract": call_sym,
-                "side": "BUY",
-                "qty": qty,
-                "filled_qty": qty,
-                "avg_price": getattr(manager.active_strategy, "current_call_ask", buyback / 2.0),
-                "status": "FILLED",
-            },
-            {
-                "time": now_str,
-                "contract": put_sym,
-                "side": "BUY",
-                "qty": qty,
-                "filled_qty": qty,
-                "avg_price": getattr(manager.active_strategy, "current_put_ask", buyback / 2.0),
-                "status": "FILLED",
-            },
-        ])
+        # Close state is removed only by confirmed Nautilus position-close callbacks.
+        session_state["active_trade"] = state_persistence.get_active_trade()
 
         badge = "danger" if "STOP_LOSS" in evt_type else ("success" if "TAKE_PROFIT" in evt_type else "info")
         category = "RISK" if "STOP_LOSS" in evt_type else ("PROFIT" if "TAKE_PROFIT" in evt_type else "STOP")
@@ -218,10 +192,17 @@ class StartStraddleRequest(BaseModel):
 
 class ShockRequest(BaseModel):
     shock_type: str
+    strategy_id: Optional[str] = None
+    symbol: Optional[str] = None
 
 
 class AutoExitRequest(BaseModel):
     enabled: bool
+
+
+class StopRequest(BaseModel):
+    strategy_id: Optional[str] = None
+    symbol: Optional[str] = None
 
 
 # -------------------------------------------------------------------------
@@ -232,6 +213,13 @@ class AutoExitRequest(BaseModel):
 async def on_startup():
     global main_event_loop
     main_event_loop = asyncio.get_running_loop()
+    manager.selector.set_event_loop(main_event_loop)
+    try:
+        await asyncio.to_thread(manager.start_for_saved_entries)
+        if manager._node_is_running():
+            await asyncio.to_thread(manager.reconcile_positions)
+    except Exception as e:
+        print(f"[Startup] Position reconciliation notice: {e}")
 
 
 # -------------------------------------------------------------------------
@@ -245,25 +233,22 @@ async def get_status():
     if manager.active_strategy:
         st = manager.active_strategy.strategy_state
         strategy_state = st.value if hasattr(st, "value") else str(st)
-    elif manager.is_running:
+    elif manager._node_is_running():
         strategy_state = "OPEN"
+    elif manager.is_running:
+        strategy_state = "WAITING_FOR_NAUTILUS"
 
-    active_trade = session_state.get("active_trade")
-    if not manager.is_running or strategy_state in ("CLOSED", "IDLE") or (active_trade or {}).get("status") == "CLOSED":
-        if strategy_state != "IDLE":
-            strategy_state = "CLOSED"
-        session_state["active_trade"] = None
-
+    node_running = manager._node_is_running()
     has_keys = bool(manager.api_key and manager.api_secret)
     return {
-        "status": "RUNNING" if manager.is_running else "IDLE",
+        "status": "RUNNING" if node_running else ("DEGRADED" if state_persistence.get_active_strategies() else "IDLE"),
         "strategy_state": strategy_state,
         "exchange": "Bybit",
         "environment": manager.environment_str,
-        "bybit_connected": has_keys,
-        "market_data_connected": True,
-        "private_api_authenticated": has_keys,
-        "nautilus_running": True,
+        "bybit_connected": node_running and manager.account_state().get("status") == "CONNECTED",
+        "market_data_connected": node_running,
+        "private_api_authenticated": node_running and manager.account_state().get("status") == "CONNECTED",
+        "nautilus_running": node_running,
         "is_simulated": manager.is_simulated,
         "has_keys": has_keys,
         "latest_telemetry": manager.latest_telemetry,
@@ -274,98 +259,91 @@ async def get_status():
 async def test_connection():
     """Tests Bybit API configuration."""
     has_keys = bool(manager.api_key and manager.api_secret)
+    node_running = manager._node_is_running()
     return {
-        "bybit_connected": has_keys,
-        "market_data_connected": True,
-        "private_api_authenticated": has_keys,
-        "nautilus_running": True,
-        "message": "Bybit Testnet API configured successfully." if has_keys else "Missing API keys.",
+        "bybit_connected": node_running and has_keys,
+        "market_data_connected": node_running,
+        "private_api_authenticated": node_running and has_keys,
+        "nautilus_running": node_running,
+        "message": "NautilusTrader TradingNode is connected." if node_running else "NautilusTrader TradingNode is not running.",
     }
-
-
-def _compute_live_positions() -> List[Dict[str, Any]]:
-    """Calculates active straddle positions with entry, mark, and unrealized PnL."""
-    positions = []
-    trade = session_state.get("active_trade")
-    if manager.active_strategy and manager.is_running and trade and trade.get("status") == "OPEN":
-        strat = manager.active_strategy
-        qty = float(strat.config.trade_size)
-
-        call_sym = str(strat.call_instrument_id).split("-OPTION")[0]
-        call_entry = strat.call_entry_price
-        call_mark = strat.current_call_ask if strat.current_call_ask > 0 else call_entry
-        call_pnl = round((call_entry - call_mark) * qty, 4)
-
-        positions.append({
-            "symbol": call_sym,
-            "side": "Sell",
-            "size": f"{qty:.2f}",
-            "avgPrice": f"{call_entry:.2f}",
-            "markPrice": f"{call_mark:.2f}",
-            "unrealisedPnl": f"{call_pnl:+.4f}",
-        })
-
-        put_sym = str(strat.put_instrument_id).split("-OPTION")[0]
-        put_entry = strat.put_entry_price
-        put_mark = strat.current_put_ask if strat.current_put_ask > 0 else put_entry
-        put_pnl = round((put_entry - put_mark) * qty, 4)
-
-        positions.append({
-            "symbol": put_sym,
-            "side": "Sell",
-            "size": f"{qty:.2f}",
-            "avgPrice": f"{put_entry:.2f}",
-            "markPrice": f"{put_mark:.2f}",
-            "unrealisedPnl": f"{put_pnl:+.4f}",
-        })
-
-    return positions
 
 
 @app.get("/api/session")
 def get_session():
-    """Returns the in-memory session state: active trade, orders, logs, and status."""
+    """Returns the persistent and live session state: active trade, positions, orders, logs, and status."""
+    # Reconcile only from NautilusTrader's live cache; never query Bybit from a route.
+    now = time.time()
+    if manager._node_is_running() and (now - getattr(manager, "_last_exit_ts", 0.0)) > 4.0:
+        if (now - getattr(manager, "_last_reconcile_ts", 0.0)) > 1.5:
+            manager._last_reconcile_ts = now
+            try:
+                manager.reconcile_positions()
+            except Exception:
+                pass
+
     state = dict(session_state)
+
+    active_strats = state_persistence.get_active_strategies()
+    live_active_strats = [
+        item for item in active_strats
+        if item.get("live_verified", True)
+        and item.get("status") != "RECONCILIATION_REQUIRED"
+    ]
+    node_running = manager._node_is_running()
+
     strategy_state = "IDLE"
     if manager.active_strategy:
         st = manager.active_strategy.strategy_state
         strategy_state = st.value if hasattr(st, "value") else str(st)
-    elif manager.is_running:
+    elif node_running and live_active_strats:
         strategy_state = "OPEN"
+    elif live_active_strats:
+        strategy_state = "WAITING_FOR_NAUTILUS_SYNC"
+    else:
+        strategy_state = "IDLE"
 
-    active_trade = session_state.get("active_trade")
-    if not manager.is_running or strategy_state in ("CLOSED", "IDLE") or (active_trade or {}).get("status") == "CLOSED":
-        if strategy_state != "IDLE":
-            strategy_state = "CLOSED"
+    if active_strats:
+        session_state["active_trade"] = active_strats[0]
+        state["active_trade"] = active_strats[0]
+    else:
         session_state["active_trade"] = None
         state["active_trade"] = None
 
-    state["live_positions"] = _compute_live_positions()
-    state["is_running"] = manager.is_running
+    state["active_strategies"] = active_strats
+
+    state["live_positions"] = manager.live_positions()
+    state["is_running"] = node_running
     state["strategy_state"] = strategy_state
     state["environment"] = manager.environment_str
     state["auto_exit_on_market"] = manager.auto_exit_on_market
+    state["orders"] = manager.order_history()
+
+    # Include persisted logs
+    persisted_logs = state_persistence.get_logs()
+    if persisted_logs:
+        existing_msgs = {l.get("message") for l in session_state.get("logs", [])}
+        for l in persisted_logs:
+            if l.get("message") not in existing_msgs:
+                session_state["logs"].append(l)
+                existing_msgs.add(l.get("message"))
+        state["logs"] = session_state["logs"]
+
     return state
 
 
 @app.post("/api/logs/clear")
 def clear_logs():
-    """Clears the in-memory log history."""
+    """Clears the in-memory and persistent log history."""
     session_state["logs"].clear()
+    state_persistence.clear_logs()
     return {"status": "CLEARED"}
 
 
 @app.get("/api/account")
 def get_account():
-    """Returns Bybit account balance and margin status."""
-    has_keys = bool(manager.api_key and manager.api_secret)
-    return {
-        "status": "CONNECTED" if has_keys else "NO_KEYS",
-        "totalEquity": "10000.00",
-        "totalWalletBalance": "10000.00",
-        "totalMarginBalance": "10000.00",
-        "totalAvailableBalance": "10000.00",
-    }
+    """Returns the balance object currently reconciled into NautilusTrader's account cache."""
+    return manager.account_state()
 
 
 @app.get("/api/market")
@@ -375,22 +353,24 @@ def get_market(expiry_ms: Optional[int] = None, strike: Optional[float] = None):
         overview = manager.get_market_overview(target_expiry_ms=expiry_ms, target_strike=strike)
         return overview
     except Exception as e:
+        logger.exception("NautilusTrader Bybit market-data request failed")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/api/config")
 def update_config(req: ConfigRequest):
-    """Swaps in new API credentials or changes environment. Stops any running strategy first."""
+    """Apply credentials/environment only when no live TradingNode or saved entry can be orphaned."""
     global manager
-    was_running = manager.is_running
-    if was_running:
-        manager.stop_straddle()
+    if manager._node_is_running() or state_persistence.get_active_strategies():
+        raise HTTPException(status_code=409, detail="Stop and reconcile all NautilusTrader positions before changing venue credentials or environment.")
 
     manager = StraddleExecutionManager(
         api_key=req.api_key,
         api_secret=req.api_secret,
         environment=req.environment,
     )
+    if main_event_loop and main_event_loop.is_running():
+        manager.selector.set_event_loop(main_event_loop)
     manager.register_listener(on_telemetry_event)
     return {"status": "SUCCESS", "environment": manager.environment_str}
 
@@ -413,40 +393,81 @@ def start_straddle(req: StartStraddleRequest):
 
 @app.post("/api/straddle/scale-in")
 def scale_in_straddle(req: StartStraddleRequest):
-    """Adds more size to the active straddle position."""
+    """Opens a separate straddle entry for an already-active strike/expiry."""
     try:
-        return manager.scale_in_straddle(additional_size=req.trade_size)
+        return manager.scale_in_straddle(
+            additional_size=req.trade_size,
+            target_strike=req.target_strike,
+            target_expiry_ms=req.target_expiry_ms,
+        )
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.post("/api/straddle/stop")
-def stop_straddle():
-    """Stops the strategy and closes all open positions."""
+def stop_straddle(req: Optional[StopRequest] = None):
+    """Stops all strategies, or closes both legs of a specific strategy if strategy_id is provided."""
+    target_id = (req.strategy_id or req.symbol) if req else None
+    if target_id and target_id != "ALL":
+        res = manager.close_strategy(target_id)
+        return res
+
     res = manager.stop_straddle()
-    session_state["active_trade"] = None
     return res
+
+
+@app.post("/api/straddle/close-strategy")
+def close_single_strategy(req: StopRequest):
+    """Closes BOTH LEGS of the specific straddle strategy."""
+    target_id = req.strategy_id or req.symbol
+    if not target_id:
+        raise HTTPException(status_code=400, detail="Missing strategy_id.")
+    res = manager.close_strategy(target_id)
+    return res
+
+
+@app.post("/api/straddle/close-position")
+def close_single_position(req: StopRequest):
+    """Legacy endpoint: closes BOTH LEGS of the straddle strategy containing this position."""
+    target_id = req.strategy_id or req.symbol
+    if not target_id:
+        raise HTTPException(status_code=400, detail="Missing contract symbol or strategy_id.")
+    res = manager.close_strategy(target_id)
+    return res
+
+
+@app.post("/api/orders/{client_order_id}/cancel")
+def cancel_order(client_order_id: str):
+    """Cancel one cached order through the NautilusTrader strategy/ExecutionEngine."""
+    result = manager.cancel_order(client_order_id)
+    if result.get("status") == "ERROR":
+        raise HTTPException(status_code=400, detail=result.get("message"))
+    return result
 
 
 @app.get("/api/orders")
 def get_orders():
-    """Returns the order list from in-memory session."""
-    return session_state.get("orders", [])
+    """Return NautilusTrader's cached orders plus durable callback history."""
+    return manager.order_history()
 
 
 @app.get("/api/positions")
 def get_positions():
-    """Returns open positions from the active Nautilus strategy."""
-    return _compute_live_positions()
+    """Return only positions reconciled in NautilusTrader's live cache."""
+    return manager.live_positions()
 
 
 @app.post("/api/straddle/shock")
 def simulate_shock(req: ShockRequest):
     """Demo helper: injects synthetic price move to trigger 1% SL or 2% TP."""
     try:
-        res = manager.simulate_price_shock(req.shock_type)
-        session_state["active_trade"] = None
+        target = req.strategy_id or req.symbol
+        res = manager.simulate_price_shock(req.shock_type, strategy_id=target)
+        if res.get("status") == "ERROR":
+            raise HTTPException(status_code=400, detail=res.get("message"))
         return res
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -536,8 +557,8 @@ async def get_walkthrough():
                     "The strategy uses self.order_factory.market(instrument_id=..., order_side=OrderSide.SELL, quantity=qty) "
                     "to construct a MarketOrder domain object stamped with a unique ClientOrderId. Calling "
                     "self.submit_order(order) generates a SubmitOrder command sent over the internal bus to the "
-                    "LiveExecEngine. The BybitExecutionClient formats this into a Bybit v5 REST (/v5/order/create) or "
-                    "WebSocket trade request."
+                    "LiveExecEngine. NautilusTrader's native Bybit execution adapter transports the order using its "
+                    "supported connection. The application does not construct or send exchange HTTP requests itself."
                 ),
             },
             {

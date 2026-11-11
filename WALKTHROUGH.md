@@ -121,8 +121,8 @@ exec_config = BybitExecClientConfig(
 
 **Answer:**  
 Instrument discovery is managed programmatically by `BybitStrikeSelector` (`straddle/strike_selector.py`):
-1. **Reference Price Discovery**: Queries the Bybit linear perpetual (`BTCUSDT`) or options index price endpoint to get the real-time underlying BTC reference price ($S_{\text{ref}}$).
-2. **Fetching Active Instruments**: Calls Bybit `/v5/market/instruments-info?category=option&baseCoin=BTC` to get all listed contracts.
+1. **Reference Price Discovery**: Uses NautilusTrader's native Bybit adapter to read the BTCUSDT linear ticker or options index price ($S_{\text{ref}}$).
+2. **Fetching Active Instruments**: Uses NautilusTrader's native Bybit adapter to load listed BTC options. The project does not create or sign raw Bybit HTTP requests.
 3. **Filtering Expiries**: Discards expired contracts and identifies the nearest future expiration timestamp ($T_{\text{nearest}}$).
 4. **ATM Strike Selection**: Filters all available strikes for $T_{\text{nearest}}$ and identifies the strike closest to $S_{\text{ref}}$:
    $$K_{\text{ATM}} = \arg\min_K |K - S_{\text{ref}}|$$
@@ -186,7 +186,7 @@ self.submit_order(put_order)
 ```
 1. `order_factory` generates unique `ClientOrderId`s and validates quantity precision according to the instrument definition (`CryptoOption.size_precision` and `lot_size = 0.01`).
 2. Calling `self.submit_order()` publishes a `SubmitOrder` command onto the MessageBus.
-3. The `LiveExecEngine` validates pre-trade risk and forwards the command to `BybitExecutionClient`, which formats an authenticated Bybit v5 REST request (`POST /v5/order/create`) or WebSocket trade message.
+3. The `LiveExecEngine` validates pre-trade risk and forwards the command to NautilusTrader's native Bybit execution adapter, which handles the exchange connection. The application does not build or send Bybit REST/WebSocket messages itself.
 
 ---
 

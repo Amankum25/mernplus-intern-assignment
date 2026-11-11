@@ -8,10 +8,53 @@ Usage:
 
 import argparse
 import os
+import subprocess
+import time
 import uvicorn
 from dotenv import load_dotenv
 
 load_dotenv()
+
+
+def free_tcp_port(port: int) -> None:
+    """Free a TCP port if it's already bound by an old orphaned process."""
+    if os.name == "nt":
+        try:
+            result = subprocess.run(
+                ["netstat", "-ano", "-p", "tcp"],
+                capture_output=True,
+                text=True,
+                check=False,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            if result.returncode == 0:
+                pids = set()
+                for line in result.stdout.splitlines():
+                    fields = line.split()
+                    if len(fields) >= 5 and fields[0].upper() == "TCP":
+                        local_endpoint = fields[1]
+                        state = fields[-2].upper()
+                        pid_text = fields[-1]
+                        if state == "LISTENING" and local_endpoint.rsplit(":", 1)[-1] == str(port):
+                            try:
+                                pid = int(pid_text)
+                                if pid != os.getpid():
+                                    pids.add(pid)
+                            except ValueError:
+                                pass
+                for pid in pids:
+                    print(f"Stopping lingering process {pid} on port {port}...")
+                    subprocess.run(
+                        ["taskkill", "/PID", str(pid), "/T", "/F"],
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                    )
+                if pids:
+                    time.sleep(1.0)
+        except Exception as e:
+            print(f"Notice during port cleanup: {e}")
 
 
 def main():
@@ -33,6 +76,7 @@ def main():
     print("=" * 70)
 
     # start the ASGI server — reload=False for production stability
+    free_tcp_port(args.port)
     uvicorn.run("web.app:app", host=args.host, port=args.port, reload=False, log_level="info")
 
 

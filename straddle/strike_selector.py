@@ -1,15 +1,32 @@
 """
-Figures out which BTC option contracts to trade.
-Queries Bybit's options chain, finds the current BTC price, and picks the Call and Put
-at the nearest ATM (At-The-Money) strike.
+================================================================================
+⚡ AT-THE-MONEY (ATM) STRIKE SELECTOR (straddle/strike_selector.py)
+================================================================================
+Discovers listed BTC option contracts, tracks underlying reference prices,
+and pairs the Call and Put options sharing the identical At-The-Money (ATM) strike.
+
+Architecture & Interview Notes:
+1. Native Adapter Integration:
+   - Does NOT use direct external REST clients (`requests`, `urllib`, `ccxt`, `pybit`).
+   - Uses NautilusTrader's PyO3 Rust-backed Bybit adapter (`get_cached_bybit_http_client`).
+2. Mathematical ATM Resolution:
+   - Evaluates spot/index price against listed strikes: K_ATM = argmin |K - S_ref|.
+   - Ensures both legs share identical strike price and expiration timestamp (delivery_time_ms).
+3. Thread & Loop Marshalling:
+   - Bridges sync Rust adapter bindings with FastAPI's asynchronous event loop safely.
+================================================================================
 """
 
+import asyncio
 import datetime
+import os
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
-import requests
-
+from nautilus_trader.adapters.bybit import BybitEnvironment, BybitProductType
+from nautilus_trader.adapters.bybit.factories import get_cached_bybit_http_client
+from nautilus_trader.core.nautilus_pyo3 import BybitTickersParams
+from nautilus_trader.model.instruments import OptionContract
 from nautilus_trader.model.identifiers import InstrumentId
 
 
@@ -17,23 +34,22 @@ from nautilus_trader.model.identifiers import InstrumentId
 class OptionContractInfo:
     """
     Holds metadata for a single Bybit BTC option contract.
-    Parsed from Bybit's instruments-info API response.
+    Parsed from Bybit's instruments-info API response via NautilusTrader.
     """
-    symbol: str               # e.g., "BTC-28MAR25-85000-C-USDT"
-    instrument_id: str        # Nautilus format: "BTC-28MAR25-85000-C-USDT-OPTION.BYBIT"
-    strike: float             # strike price in USD
-    option_type: str          # "CALL" or "PUT"
-    delivery_time_ms: int     # expiry timestamp in epoch milliseconds
-    expiry_str: str           # human-readable expiry like "2025-03-28 08:00 UTC"
-    min_order_qty: float      # minimum contract size (usually 0.01 BTC on Bybit)
-    price_tick_size: float    # smallest price increment (usually $5.00)
+    symbol: str               # Bybit contract symbol (e.g. 'BTC-14NOV26-67000-C-USDT')
+    instrument_id: str        # Nautilus ID format (e.g. 'BTC-14NOV26-67000-C-USDT-OPTION.BYBIT')
+    strike: float             # Strike price in USD
+    option_type: str          # 'CALL' or 'PUT'
+    delivery_time_ms: int     # Expiry timestamp in epoch milliseconds (determines expiry pairing)
+    expiry_str: str           # Human-readable UTC expiry string (e.g. '2026-11-14 08:00 UTC')
+    min_order_qty: float      # Minimum trade size (0.01 BTC on Bybit)
+    price_tick_size: float    # Smallest price increment for quoting ($5.00)
 
 
 @dataclass
 class StraddlePair:
     """
-    The result of ATM strike selection — holds the matched Call and Put contracts
-    at the same strike and expiry, plus supporting data for the UI.
+    Result of ATM resolution — holds paired Call and Put legs sharing the same strike and expiry.
     """
     btc_price: float
     expiry_ms: int
@@ -45,26 +61,124 @@ class StraddlePair:
     available_expiries: List[Dict[str, Any]] = field(default_factory=list)
     strike_matrix: List[Dict[str, Any]] = field(default_factory=list)
     selected_strike: float = 0.0
+    available_contracts_count: int = 0
 
 
 class BybitStrikeSelector:
     """
-    Queries Bybit's public API to find the best ATM straddle pair.
-    No auth required — everything here uses public market data endpoints.
+    Uses NautilusTrader's native Bybit adapter to discover BTC option instruments
+    and query reference/option ticker data. This module has no HTTP/REST client of its own.
     """
 
-    def __init__(self, base_url: str = "https://api.bybit.com"):
-        self.base_url = base_url.rstrip("/")
-        self.session = requests.Session()
+    def __init__(
+        self,
+        environment: str = "DEMO",
+        api_key: str = "",
+        api_secret: str = "",
+        event_loop: Optional[asyncio.AbstractEventLoop] = None,
+    ):
+        environments = {
+            "DEMO": BybitEnvironment.DEMO,
+            "TESTNET": BybitEnvironment.TESTNET,
+            "MAINNET": BybitEnvironment.MAINNET,
+        }
+        self.environment = environments.get(environment.upper(), BybitEnvironment.DEMO)
+        self._api_key = api_key or os.getenv("BYBIT_API_KEY", "")
+        self._api_secret = api_secret or os.getenv("BYBIT_API_SECRET", "")
+        self._event_loop = event_loop
+        self.http_client = get_cached_bybit_http_client(
+            environment=self.environment,
+            api_key=self._api_key,
+            api_secret=self._api_secret,
+            timeout_secs=8,
+            max_retries=0,
+            retry_delay_ms=100,
+            retry_delay_max_ms=250,
+        )
         self._cached_contracts: List[OptionContractInfo] = []
         self._cached_contracts_ts: float = 0.0
         self._cached_price: float = 0.0
         self._cached_price_ts: float = 0.0
 
+    def set_event_loop(self, event_loop: asyncio.AbstractEventLoop) -> None:
+        """Use the FastAPI/TradingNode host loop for adapter I/O when available."""
+        self._event_loop = event_loop
+
+    def _run_native(self, operation):
+        """Run a native Bybit adapter call on the configured application event loop.
+
+        The Rust-backed Bybit HTTP helper requires an active asyncio loop even though
+        its public methods are synchronous. FastAPI invokes sync endpoints in worker
+        threads, so marshal the operation onto the loop captured at app startup.
+        """
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            current_loop = None
+
+        loop = self._event_loop
+        if loop is None or not loop.is_running():
+            # If the caller already runs inside an event loop, execute there rather
+            # than creating a second loop around NautilusTrader's native client.
+            if current_loop is not None:
+                return operation()
+            raise RuntimeError(
+                "NautilusTrader Bybit market reads require the running application event loop; "
+                "start the dashboard before requesting market data."
+            )
+
+        if current_loop is loop:
+            # This is only a non-blocking native callback when called from the owning
+            # loop. FastAPI market routes are synchronous and run in worker threads.
+            return operation()
+
+        async def invoke():
+            result = operation()
+            if hasattr(result, "__await__"):
+                return await result
+            return result
+
+        future = asyncio.run_coroutine_threadsafe(invoke(), loop)
+        try:
+            # There are up to four serial reads (reference, instruments, two quotes),
+            # each configured with an 8 second adapter timeout.
+            return future.result(timeout=40)
+        except TimeoutError as exc:
+            future.cancel()
+            raise TimeoutError("NautilusTrader Bybit market-data request timed out after 40 seconds.") from exc
+
+    def _request_tickers(self, product_type: BybitProductType, symbol: Optional[str] = None, base_coin: Optional[str] = None):
+        params = BybitTickersParams(category=product_type, symbol=symbol, base_coin=base_coin)
+        return self._run_native(lambda: self.http_client.request_tickers(params))
+
+    def get_ticker(self, symbol: str, product_type: BybitProductType = BybitProductType.OPTION) -> Dict[str, float]:
+        """Return normalized ticker fields from NautilusTrader's native Bybit adapter."""
+        tickers = self._request_tickers(product_type, symbol=symbol)
+        if not tickers:
+            return {
+                "bid1Price": 0.0,
+                "ask1Price": 0.0,
+                "bid1Size": 0.0,
+                "ask1Size": 0.0,
+                "markPrice": 0.0,
+                "lastPrice": 0.0,
+                "indexPrice": 0.0,
+            }
+        ticker = tickers[0]
+        return {
+            "bid1Price": float(ticker.bid1_price or 0.0),
+            "ask1Price": float(ticker.ask1_price or 0.0),
+            "bid1Size": float(ticker.bid1_size or 0.0),
+            "ask1Size": float(ticker.ask1_size or 0.0),
+            "markPrice": float(ticker.mark_price or 0.0),
+            "lastPrice": float(ticker.last_price or 0.0),
+            "indexPrice": float(ticker.index_price or 0.0),
+        }
+
     def get_btc_reference_price(self) -> float:
         """
         Gets the current BTC price from Bybit.
-        Tries the BTCUSDT perpetual first (most liquid), falls back to option index price.
+        Reads the BTCUSDT linear ticker through NautilusTrader's Bybit adapter.
         Cached for 2.5 seconds so we don't hammer the API on every tick.
         """
         now = time.time()
@@ -72,12 +186,10 @@ class BybitStrikeSelector:
             return self._cached_price
 
         try:
-            # Primary: BTCUSDT linear perpetual — tightest spread, most reliable price
-            url = f"{self.base_url}/v5/market/tickers?category=linear&symbol=BTCUSDT"
-            res = self.session.get(url, timeout=3).json()
-            if res.get("retCode") == 0 and res.get("result", {}).get("list"):
-                ticker = res["result"]["list"][0]
-                price = float(ticker.get("lastPrice") or ticker.get("indexPrice") or ticker.get("markPrice"))
+            tickers = self._request_tickers(BybitProductType.LINEAR, symbol="BTCUSDT")
+            if tickers:
+                ticker = tickers[0]
+                price = float(ticker.last_price or ticker.index_price or ticker.mark_price or 0.0)
                 if price > 0:
                     self._cached_price = price
                     self._cached_price_ts = now
@@ -86,21 +198,17 @@ class BybitStrikeSelector:
             print(f"[StrikeSelector] Failed to fetch linear BTCUSDT price: {e}")
 
         try:
-            # Fallback: BTC option index price — slightly less responsive but still reliable
-            url = f"{self.base_url}/v5/market/tickers?category=option&baseCoin=BTC"
-            res = self.session.get(url, timeout=3).json()
-            if res.get("retCode") == 0 and res.get("result", {}).get("list"):
-                for t in res["result"]["list"]:
-                    ref = float(t.get("underlyingPrice") or t.get("indexPrice") or 0)
-                    if ref > 0:
-                        self._cached_price = ref
-                        self._cached_price_ts = now
-                        return ref
+            tickers = self._request_tickers(BybitProductType.OPTION, base_coin="BTC")
+            for ticker in tickers or []:
+                ref = float(ticker.index_price or 0.0)
+                if ref > 0:
+                    self._cached_price = ref
+                    self._cached_price_ts = now
+                    return ref
         except Exception as e:
             print(f"[StrikeSelector] Failed to fetch option tickers: {e}")
 
-        # If both sources fail, return last known price or a safe default
-        return self._cached_price if self._cached_price > 0 else 75000.0
+        raise RuntimeError("NautilusTrader's Bybit adapter could not provide a live BTC reference price.")
 
     def get_all_option_contracts(self) -> List[OptionContractInfo]:
         """
@@ -111,27 +219,27 @@ class BybitStrikeSelector:
         if self._cached_contracts and (now - self._cached_contracts_ts) < 45.0:
             return self._cached_contracts
 
-        url = f"{self.base_url}/v5/market/instruments-info?category=option&baseCoin=BTC&limit=1000"
         try:
-            res = self.session.get(url, timeout=4).json()
-            if res.get("retCode") != 0 or not res.get("result", {}).get("list"):
+            instruments = self._run_native(lambda: self.http_client.request_instruments(BybitProductType.OPTION, None, "BTC"))
+            if not instruments:
                 if self._cached_contracts:
                     return self._cached_contracts
-                raise RuntimeError(f"Bybit API error: {res.get('retMsg', 'Unknown error')}")
-
+                raise RuntimeError("NautilusTrader's Bybit adapter returned no BTC option instruments.")
             now_ms = int(datetime.datetime.now(datetime.timezone.utc).timestamp() * 1000)
             contracts: List[OptionContractInfo] = []
 
-            for item in res["result"]["list"]:
-                delivery_time_ms = int(item.get("deliveryTime", 0))
+            for instrument in instruments:
+                if not hasattr(instrument, "expiration_ns") or not hasattr(instrument, "raw_symbol"):
+                    continue
+                delivery_time_ms = int(instrument.expiration_ns // 1_000_000)
                 # skip expired contracts
                 if delivery_time_ms <= now_ms:
                     continue
 
-                raw_symbol = item["symbol"]  # e.g., BTC-7NOV26-75750-C-USDT
-                options_type = item.get("optionsType", "").upper()
+                raw_symbol = str(instrument.raw_symbol)  # native instrument's Bybit symbol
+                options_type = "CALL" if "-C-" in raw_symbol else "PUT" if "-P-" in raw_symbol else ""
                 if not options_type:
-                    options_type = "CALL" if "-C" in raw_symbol else "PUT"
+                    continue
 
                 # parse strike from the symbol name (3rd segment after splitting by "-")
                 parts = raw_symbol.split("-")
@@ -140,19 +248,19 @@ class BybitStrikeSelector:
                     try:
                         strike = float(parts[2])
                     except ValueError:
-                        strike = float(item.get("strikePrice", 0))
+                        strike = instrument.strike_price.as_double()
                 else:
-                    strike = float(item.get("strikePrice", 0))
+                    strike = instrument.strike_price.as_double()
 
                 if strike <= 0:
                     continue
 
-                instrument_id = f"{raw_symbol}-OPTION.BYBIT"
+                instrument_id = str(instrument.id)
                 exp_dt = datetime.datetime.fromtimestamp(delivery_time_ms / 1000, datetime.timezone.utc)
                 expiry_str = exp_dt.strftime("%Y-%m-%d %H:%M UTC")
 
-                min_order_qty = float(item.get("lotSizeFilter", {}).get("minOrderQty", 0.01))
-                price_tick_size = float(item.get("priceFilter", {}).get("tickSize", 5.0))
+                min_order_qty = instrument.min_quantity.as_double()
+                price_tick_size = instrument.price_increment.as_double()
 
                 contracts.append(
                     OptionContractInfo(
@@ -269,4 +377,5 @@ class BybitStrikeSelector:
             available_expiries=available_expiries,
             strike_matrix=strike_matrix,
             selected_strike=chosen_strike,
+            available_contracts_count=len(contracts_at_expiry),
         )

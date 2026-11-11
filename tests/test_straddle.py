@@ -9,6 +9,7 @@ Covers:
 from decimal import Decimal
 import pytest
 from nautilus_trader.model.identifiers import ClientOrderId, InstrumentId
+from nautilus_trader.model.enums import OmsType
 
 from straddle.config import BTCShortStraddleConfig
 from straddle.strategy import BTCShortStraddleStrategy, StrategyState
@@ -36,13 +37,22 @@ def test_atm_strike_calculation_logic():
     assert atm_3 == 75000.0
 
 
-def test_live_bybit_strike_discovery():
-    """Query Bybit API and verify valid ATM Call and Put straddle pairing."""
+def test_bybit_strike_discovery_pairs_both_legs(monkeypatch):
+    """Verify ATM pairing locally without requiring a live network connection."""
     selector = BybitStrikeSelector()
+    expiry = 1_800_000_000_000
+    contracts = [
+        OptionContractInfo("BTC-7NOV26-75000-C-USDT", "BTC-7NOV26-75000-C-USDT-OPTION.BYBIT", 75000.0, "CALL", expiry, "2026-11-07", 0.01, 0.5),
+        OptionContractInfo("BTC-7NOV26-75000-P-USDT", "BTC-7NOV26-75000-P-USDT-OPTION.BYBIT", 75000.0, "PUT", expiry, "2026-11-07", 0.01, 0.5),
+        OptionContractInfo("BTC-7NOV26-76000-C-USDT", "BTC-7NOV26-76000-C-USDT-OPTION.BYBIT", 76000.0, "CALL", expiry, "2026-11-07", 0.01, 0.5),
+        OptionContractInfo("BTC-7NOV26-76000-P-USDT", "BTC-7NOV26-76000-P-USDT-OPTION.BYBIT", 76000.0, "PUT", expiry, "2026-11-07", 0.01, 0.5),
+    ]
+    monkeypatch.setattr(selector, "get_btc_reference_price", lambda: 75_100.0)
+    monkeypatch.setattr(selector, "get_all_option_contracts", lambda: contracts)
     pair = selector.select_atm_straddle()
 
-    assert pair.btc_price > 0
-    assert pair.atm_strike > 0
+    assert pair.btc_price == 75_100.0
+    assert pair.atm_strike == 75_000.0
     assert pair.call_contract is not None
     assert pair.put_contract is not None
 
@@ -57,6 +67,41 @@ def test_live_bybit_strike_discovery():
     assert pair.put_contract.option_type == "PUT"
     assert pair.call_contract.instrument_id.endswith("-OPTION.BYBIT")
     assert pair.put_contract.instrument_id.endswith("-OPTION.BYBIT")
+
+
+def test_native_sync_adapter_call_is_marshaled_to_host_loop(monkeypatch):
+    """Rust-backed sync Bybit adapter methods must run on the app's active loop."""
+    selector = BybitStrikeSelector()
+    loop = type("Loop", (), {
+        "is_running": lambda self: True,
+    })()
+    selector.set_event_loop(loop)
+    scheduled = {}
+
+    class Future:
+        def result(self, timeout):
+            scheduled["timeout"] = timeout
+            return "adapter result"
+
+        def cancel(self):
+            scheduled["cancelled"] = True
+
+    def schedule(coroutine, target_loop):
+        scheduled["loop"] = target_loop
+        coroutine.close()
+        return Future()
+
+    monkeypatch.setattr("straddle.strike_selector.asyncio.run_coroutine_threadsafe", schedule)
+    assert selector._run_native(lambda: pytest.fail("must execute on the configured host loop")) == "adapter result"
+    assert scheduled["loop"] is loop
+    assert scheduled["timeout"] == 40
+
+
+def test_native_adapter_call_fails_fast_without_running_loop():
+    """Avoid hanging on asyncio.run when market reads happen before app startup."""
+    selector = BybitStrikeSelector()
+    with pytest.raises(RuntimeError, match="running application event loop"):
+        selector._run_native(lambda: None)
 
 
 # =============================================================================
@@ -78,6 +123,7 @@ def test_straddle_entry_and_targets_calculation():
     )
 
     strat = BTCShortStraddleStrategy(config=config)
+    assert config.oms_type == OmsType.HEDGING
 
     # Simulate entry fills: Call sold at $1200, Put sold at $1000
     strat.call_entry_filled = True
@@ -164,4 +210,138 @@ def test_legging_failure_unhedged_handling():
 
     # State must transition to UNHEDGED_ALERT
     assert strat.strategy_state == StrategyState.UNHEDGED_ALERT
+
+
+def test_strategy_closure_closes_both_legs():
+    """Closing a saved entry queues its exact NautilusTrader virtual positions."""
+    from unittest.mock import MagicMock
+    from straddle.execution_manager import StraddleExecutionManager
+    from straddle.persistence import state_persistence
+
+    state_persistence.clear_all_active_strategies()
+
+    # Add 2 strategies
+    strat1 = {
+        "strategy_id": "STRAT-1",
+        "name": "Strategy #1: $68,000 Straddle",
+        "call_symbol": "BTC-13NOV26-68000-C-USDT",
+        "put_symbol": "BTC-13NOV26-68000-P-USDT",
+        "trade_size": 0.02,
+        "call_position_id": "P-CALL-1",
+        "put_position_id": "P-PUT-1",
+        "live_verified": True,
+        "combined_entry_premium": 500.0,
+        "current_buyback_premium": 500.0,
+        "created_ts": 1000.0,
+    }
+    strat2 = {
+        "strategy_id": "STRAT-2",
+        "name": "Strategy #2: $69,000 Straddle",
+        "call_symbol": "BTC-13NOV26-69000-C-USDT",
+        "put_symbol": "BTC-13NOV26-69000-P-USDT",
+        "trade_size": 0.03,
+        "call_position_id": "P-CALL-2",
+        "put_position_id": "P-PUT-2",
+        "live_verified": True,
+        "combined_entry_premium": 520.0,
+        "current_buyback_premium": 520.0,
+        "created_ts": 2000.0,
+    }
+    state_persistence.add_active_strategy(strat1)
+    state_persistence.add_active_strategy(strat2)
+
+    # Verify descending order of time: strat2 (created_ts=2000) must be first!
+    active = state_persistence.get_active_strategies()
+    assert len(active) == 2
+    assert active[0]["strategy_id"] == "STRAT-2"
+    assert active[1]["strategy_id"] == "STRAT-1"
+
+    mgr = StraddleExecutionManager(api_key="mock", api_secret="mock")
+    mgr.is_running = True
+    mgr.active_strategy = MagicMock()
+    mgr._node_is_running = lambda: True
+    mgr.reconcile_positions = lambda: []
+
+    # Close STRAT-2
+    res = mgr.close_strategy("STRAT-2")
+    assert res["status"] == "CLOSING"
+    mgr.active_strategy.queue_close.assert_called_once_with(
+        "STRAT-2", {"CALL": "P-CALL-2", "PUT": "P-PUT-2"}
+    )
+    # Entries remain persisted until NautilusTrader confirms both positions closed.
+    remaining = state_persistence.get_active_strategies()
+    assert len(remaining) == 2
+
+    state_persistence.clear_all_active_strategies()
+
+
+def test_portfolio_price_shock_closure():
+    """The dashboard risk action queues closes through the active Nautilus strategy."""
+    from unittest.mock import MagicMock
+    from straddle.execution_manager import StraddleExecutionManager
+    from straddle.persistence import state_persistence
+
+    state_persistence.clear_all_active_strategies()
+    state_persistence.add_active_strategy({
+        "strategy_id": "STRAT-SHOCK",
+        "call_symbol": "BTC-13NOV26-68000-C-USDT",
+        "put_symbol": "BTC-13NOV26-68000-P-USDT",
+        "call_position_id": "P-CALL-SHOCK",
+        "put_position_id": "P-PUT-SHOCK",
+        "live_verified": True,
+    })
+    mgr = StraddleExecutionManager(api_key="mock", api_secret="mock")
+    mgr.is_running = True
+    mgr.active_strategy = MagicMock()
+    mgr._node_is_running = lambda: True
+    mgr.reconcile_positions = lambda: []
+
+    res = mgr.simulate_price_shock("STOP_LOSS", symbol="ALL")
+    assert res["status"] == "CLOSING"
+    mgr.active_strategy.queue_close.assert_called_once_with(
+        "STRAT-SHOCK", {"CALL": "P-CALL-SHOCK", "PUT": "P-PUT-SHOCK"}
+    )
+    assert state_persistence.get_active_strategies()
+    state_persistence.clear_all_active_strategies()
+
+
+def test_pytest_persistence_is_separate_from_live_session_file():
+    """The default launcher test suite must not rewrite live persisted state."""
+    from pathlib import Path
+    from straddle.persistence import state_persistence
+
+    live_state = Path(__file__).resolve().parents[1] / "data" / "session_state.json"
+    assert Path(state_persistence.filepath).resolve() != live_state.resolve()
+
+
+def test_empty_restart_snapshot_keeps_saved_straddle_mapping():
+    """An empty startup position snapshot must not erase persisted entries."""
+    from unittest.mock import MagicMock
+    from straddle.execution_manager import StraddleExecutionManager
+    from straddle.persistence import state_persistence
+
+    state_persistence.clear_all_active_strategies()
+    state_persistence.add_active_strategy({
+        "strategy_id": "STRAT-EMPTY-SNAPSHOT-TEST",
+        "call_symbol": "BTC-13NOV26-68000-C-USDT",
+        "put_symbol": "BTC-13NOV26-68000-P-USDT",
+        "trade_size": 0.01,
+        "status": "OPEN",
+    })
+    manager = StraddleExecutionManager(api_key="mock", api_secret="mock")
+    manager.node = MagicMock()
+    manager.node.is_running.return_value = True
+    manager.node.cache.positions_open.return_value = []
+
+    assert manager.reconcile_positions() == []
+    saved = state_persistence.get_active_strategies()
+    assert len(saved) == 1
+    assert saved[0]["strategy_id"] == "STRAT-EMPTY-SNAPSHOT-TEST"
+    assert saved[0]["status"] == "RECONCILIATION_REQUIRED"
+    assert saved[0]["live_verified"] is False
+    close_result = manager.close_strategy("STRAT-EMPTY-SNAPSHOT-TEST")
+    assert close_result["status"] == "ERROR"
+    assert close_result["verified_flat"] is False
+    manager.node.cache.positions_open.assert_called()
+    state_persistence.clear_all_active_strategies()
 
