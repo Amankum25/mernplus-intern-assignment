@@ -170,6 +170,15 @@ class BTCShortStraddleStrategy(Strategy):
                 self.current_pnl_pct = ((self.combined_entry_premium - self.current_buyback_premium) / self.combined_entry_premium) * 100.0
                 self.current_pnl_usd = (self.combined_entry_premium - self.current_buyback_premium) * float(self.config.trade_size)
 
+            self._emit("VALUATION_UPDATE", {
+                "buyback_premium": self.current_buyback_premium,
+                "current_buyback_premium": self.current_buyback_premium,
+                "pnl_pct": self.current_pnl_pct,
+                "pnl_usd": self.current_pnl_usd,
+                "call_ask": self.current_call_ask,
+                "put_ask": self.current_put_ask,
+            })
+
             if self.config.level == 2:
                 self._check_risk_management()
 
@@ -179,7 +188,7 @@ class BTCShortStraddleStrategy(Strategy):
             return
 
         if self.current_buyback_premium >= self.stop_loss_target_premium:
-            self.log.warn(f"STOP-LOSS HIT: Buyback ${self.current_buyback_premium:.2f} >= ${self.stop_loss_target_premium:.2f}")
+            self.log.warning(f"STOP-LOSS HIT: Buyback ${self.current_buyback_premium:.2f} >= ${self.stop_loss_target_premium:.2f}")
             self._exit_straddle("STOP_LOSS_TRIGGERED")
         elif self.current_buyback_premium <= self.take_profit_target_premium:
             self.log.info(f"TAKE-PROFIT HIT: Buyback ${self.current_buyback_premium:.2f} <= ${self.take_profit_target_premium:.2f}", LogColor.GREEN)

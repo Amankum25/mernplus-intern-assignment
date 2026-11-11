@@ -2285,11 +2285,12 @@
             const pnlPct = parseFloat(msg.pnl_pct || 0);
             const pnlUsd = parseFloat(msg.pnl_usd || 0);
             updatePnlDisplay(pnlPct, pnlUsd, currentStrategyLevel);
-            if (msg.current_buyback_premium) {
+            const buyback = msg.current_buyback_premium || msg.buyback_premium;
+            if (buyback) {
               const buybackEl = document.getElementById("currentBuybackVal");
-              if (buybackEl) buybackEl.innerText = fmtUSD(msg.current_buyback_premium);
+              if (buybackEl) buybackEl.innerText = fmtUSD(buyback);
             }
-          } else if (msg.type === "ORDER_FILLED" || msg.type === "STRADDLE_CLOSED" || msg.type === "EXIT_TRIGGERED") {
+          } else {
             fetchSessionState();
             fetchPositions();
             fetchOrders();

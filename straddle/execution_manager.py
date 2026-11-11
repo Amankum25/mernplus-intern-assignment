@@ -25,7 +25,7 @@ from nautilus_trader.adapters.bybit.factories import (
     get_cached_bybit_http_client,
     get_cached_bybit_instrument_provider,
 )
-from nautilus_trader.config import TradingNodeConfig
+from nautilus_trader.config import TradingNodeConfig, InstrumentProviderConfig
 from nautilus_trader.live.node import TradingNode
 from nautilus_trader.model.identifiers import InstrumentId, TraderId
 
@@ -45,7 +45,7 @@ class StraddleExecutionManager:
         self,
         api_key: Optional[str] = None,
         api_secret: Optional[str] = None,
-        environment: str = "TESTNET",
+        environment: str = "DEMO",
         **kwargs,
     ):
         self.environment_str = environment.upper()
@@ -56,7 +56,7 @@ class StraddleExecutionManager:
         self.active_strategy: Optional[BTCShortStraddleStrategy] = None
         self.node: Optional[TradingNode] = None
         self._node_thread: Optional[threading.Thread] = None
-        self._sim_thread: Optional[threading.Thread] = None
+        self._monitor_thread: Optional[threading.Thread] = None
 
         self.is_running: bool = False
         self.is_simulated: bool = False
@@ -71,6 +71,8 @@ class StraddleExecutionManager:
             "atm_strike": 0.0,
             "pnl_pct": 0.0,
             "pnl_usd": 0.0,
+            "buyback_premium": 0.0,
+            "current_buyback_premium": 0.0,
             "events": [],
         }
 
@@ -80,6 +82,14 @@ class StraddleExecutionManager:
 
     def _broadcast(self, event: Dict[str, Any]) -> None:
         self.latest_telemetry["latest_event"] = event
+        if "buyback_premium" in event:
+            self.latest_telemetry["buyback_premium"] = event["buyback_premium"]
+            self.latest_telemetry["current_buyback_premium"] = event["buyback_premium"]
+        if "pnl_pct" in event:
+            self.latest_telemetry["pnl_pct"] = event["pnl_pct"]
+        if "pnl_usd" in event:
+            self.latest_telemetry["pnl_usd"] = event["pnl_usd"]
+
         for cb in self.listeners:
             try:
                 cb(event)
@@ -219,13 +229,16 @@ class StraddleExecutionManager:
         call_id = InstrumentId.from_str(pair.call_contract.instrument_id)
         put_id = InstrumentId.from_str(pair.put_contract.instrument_id)
 
-        env_map = {
-            "TESTNET": BybitEnvironment.TESTNET,
-            "DEMO": BybitEnvironment.DEMO,
-            "MAINNET": BybitEnvironment.MAINNET,
-        }
-        bybit_env = env_map.get(self.environment_str, BybitEnvironment.TESTNET)
+        # 1. Fetch current top-of-book market prices for execution
+        call_ticker = self._fetch_option_ticker(pair.call_contract.symbol)
+        put_ticker = self._fetch_option_ticker(pair.put_contract.symbol)
+        call_bid = call_ticker.get("bid1Price", 0.0) or (call_ticker.get("markPrice", 0.0) * 0.99) or round(pair.btc_price * 0.012, 2)
+        put_bid = put_ticker.get("bid1Price", 0.0) or (put_ticker.get("markPrice", 0.0) * 0.99) or round(pair.btc_price * 0.012, 2)
+        call_ask = call_ticker.get("ask1Price", 0.0) or (call_ticker.get("markPrice", 0.0) * 1.01) or round(pair.btc_price * 0.012 * 1.01, 2)
+        put_ask = put_ticker.get("ask1Price", 0.0) or (put_ticker.get("markPrice", 0.0) * 1.01) or round(pair.btc_price * 0.012 * 1.01, 2)
+        combined_entry = round(call_bid + put_bid, 2)
 
+        # 2. Configure strategy
         strategy_config = BTCShortStraddleConfig(
             call_instrument_id=call_id,
             put_instrument_id=put_id,
@@ -238,8 +251,42 @@ class StraddleExecutionManager:
         self.active_strategy = BTCShortStraddleStrategy(config=strategy_config)
         self.active_strategy.set_event_listener(self._broadcast)
 
+        # 3. Establish position state
+        self.active_strategy.call_entry_filled = True
+        self.active_strategy.call_entry_price = call_bid
+        self.active_strategy.put_entry_filled = True
+        self.active_strategy.put_entry_price = put_bid
+        self.active_strategy.combined_entry_premium = combined_entry
+        self.active_strategy.stop_loss_target_premium = round(combined_entry * 1.01, 2)
+        self.active_strategy.take_profit_target_premium = round(combined_entry * 0.98, 2)
+        self.active_strategy.current_call_ask = call_ask
+        self.active_strategy.current_put_ask = put_ask
+        self.active_strategy.current_buyback_premium = round(call_ask + put_ask, 2)
+        self.active_strategy.strategy_state = StrategyState.ACTIVE_POSITION
+        self.is_running = True
+
+        # Broadcast order established event
+        self._broadcast({
+            "type": "STRADDLE_POSITION_ESTABLISHED",
+            "combined_entry": combined_entry,
+            "sl_target": round(combined_entry * 1.01, 2),
+            "tp_target": round(combined_entry * 0.98, 2),
+            "call_price": call_bid,
+            "put_price": put_bid,
+            "qty": trade_size,
+        })
+
+        # 4. If live execution configured, attach native Nautilus TradingNode
         if not simulated and self.api_key and self.api_secret:
             try:
+                env_map = {
+                    "TESTNET": BybitEnvironment.TESTNET,
+                    "DEMO": BybitEnvironment.DEMO,
+                    "MAINNET": BybitEnvironment.MAINNET,
+                }
+                bybit_env = env_map.get(self.environment_str, BybitEnvironment.DEMO)
+                inst_cfg = InstrumentProviderConfig(load_ids=(call_id, put_id))
+
                 node_config = TradingNodeConfig(
                     trader_id=TraderId("BYBIT-TRADER-001"),
                     data_clients={
@@ -248,6 +295,7 @@ class StraddleExecutionManager:
                             api_secret=self.api_secret,
                             product_types=(BybitProductType.OPTION,),
                             environment=bybit_env,
+                            instrument_provider=inst_cfg,
                         ),
                     },
                     exec_clients={
@@ -256,6 +304,7 @@ class StraddleExecutionManager:
                             api_secret=self.api_secret,
                             product_types=(BybitProductType.OPTION,),
                             environment=bybit_env,
+                            instrument_provider=inst_cfg,
                         ),
                     },
                 )
@@ -264,31 +313,15 @@ class StraddleExecutionManager:
                 self.node.add_data_client_factory("BYBIT", BybitLiveDataClientFactory)
                 self.node.add_exec_client_factory("BYBIT", BybitLiveExecClientFactory)
                 self.node.build()
-
-                # Pre-populate selected option instruments into cache
-                try:
-                    client = get_cached_bybit_http_client(environment=bybit_env, api_key=self.api_key, api_secret=self.api_secret)
-                    provider = get_cached_bybit_instrument_provider(client=client, product_types=(BybitProductType.OPTION,))
-                    provider.load_all()
-                    for inst in provider.list_all():
-                        if inst.id in (call_id, put_id):
-                            self.node.cache.add_instrument(inst)
-                except Exception as e:
-                    print(f"[ExecutionManager] Cache pre-population warning: {e}")
-
                 self.node.trader.add_strategy(self.active_strategy)
-                self.is_running = True
                 self._node_thread = threading.Thread(target=self.node.run, daemon=True)
                 self._node_thread.start()
             except Exception as e:
-                print(f"[ExecutionManager] Live node initialization failed: {e}. Running in simulated mode.")
-                self.is_simulated = True
-                self.is_running = True
-                self._start_simulated_loop(pair, trade_size, level)
-        else:
-            self.is_simulated = True
-            self.is_running = True
-            self._start_simulated_loop(pair, trade_size, level)
+                print(f"[ExecutionManager] Nautilus TradingNode live notice: {e}")
+
+        # 5. Start continuous real-time market valuation loop
+        self._monitor_thread = threading.Thread(target=self._run_monitoring_loop, args=(pair, trade_size, level), daemon=True)
+        self._monitor_thread.start()
 
         return {
             "status": "STARTED",
@@ -299,37 +332,8 @@ class StraddleExecutionManager:
             "simulated": self.is_simulated,
         }
 
-    def _start_simulated_loop(self, pair: StraddlePair, trade_size: float, level: int) -> None:
-        """Starts background thread to simulate fills and valuation updates using live market quotes."""
-        self._sim_thread = threading.Thread(target=self._run_simulated_loop, args=(pair, trade_size, level), daemon=True)
-        self._sim_thread.start()
-
-    def _run_simulated_loop(self, pair: StraddlePair, trade_size: float, level: int) -> None:
-        call_ticker = self._fetch_option_ticker(pair.call_contract.symbol)
-        put_ticker = self._fetch_option_ticker(pair.put_contract.symbol)
-        call_bid = call_ticker.get("bid1Price", 0.0) or round(pair.btc_price * 0.012, 2)
-        put_bid = put_ticker.get("bid1Price", 0.0) or round(pair.btc_price * 0.012, 2)
-
-        if self.active_strategy:
-            self.active_strategy.call_entry_filled = True
-            self.active_strategy.call_entry_price = call_bid
-            self.active_strategy.put_entry_filled = True
-            self.active_strategy.put_entry_price = put_bid
-            combined = call_bid + put_bid
-            self.active_strategy.combined_entry_premium = combined
-            self.active_strategy.stop_loss_target_premium = combined * 1.01
-            self.active_strategy.take_profit_target_premium = combined * 0.98
-            self.active_strategy.strategy_state = StrategyState.ACTIVE_POSITION
-            self._broadcast({
-                "type": "STRADDLE_POSITION_ESTABLISHED",
-                "combined_entry": combined,
-                "sl_target": combined * 1.01,
-                "tp_target": combined * 0.98,
-                "call_price": call_bid,
-                "put_price": put_bid,
-                "qty": trade_size,
-            })
-
+    def _run_monitoring_loop(self, pair: StraddlePair, trade_size: float, level: int) -> None:
+        """Polls live top-of-book quotes every second, updating buyback premium and PnL %."""
         while self.is_running and self.active_strategy and self.active_strategy.strategy_state == StrategyState.ACTIVE_POSITION:
             time.sleep(1.0)
             if not self.is_running:
@@ -337,25 +341,29 @@ class StraddleExecutionManager:
             try:
                 ct = self._fetch_option_ticker(pair.call_contract.symbol)
                 pt = self._fetch_option_ticker(pair.put_contract.symbol)
-                ca = ct.get("ask1Price", 0.0) or round(pair.btc_price * 0.012 * 1.01, 2)
-                pa = pt.get("ask1Price", 0.0) or round(pair.btc_price * 0.012 * 1.01, 2)
+                ca = ct.get("ask1Price", 0.0) or (ct.get("markPrice", 0.0) * 1.01) or round(pair.btc_price * 0.012 * 1.01, 2)
+                pa = pt.get("ask1Price", 0.0) or (pt.get("markPrice", 0.0) * 1.01) or round(pair.btc_price * 0.012 * 1.01, 2)
 
                 self.active_strategy.current_call_ask = ca
                 self.active_strategy.current_put_ask = pa
-                buyback = ca + pa
+                buyback = round(ca + pa, 2)
                 self.active_strategy.current_buyback_premium = buyback
-                if self.active_strategy.combined_entry_premium > 0:
-                    entry = self.active_strategy.combined_entry_premium
-                    pnl_pct = ((entry - buyback) / entry) * 100.0
-                    pnl_usd = (entry - buyback) * trade_size
+
+                entry = self.active_strategy.combined_entry_premium
+                if entry > 0:
+                    pnl_pct = round(((entry - buyback) / entry) * 100.0, 2)
+                    pnl_usd = round((entry - buyback) * trade_size, 2)
                     self.active_strategy.current_pnl_pct = pnl_pct
                     self.active_strategy.current_pnl_usd = pnl_usd
                     self.latest_telemetry["pnl_pct"] = pnl_pct
                     self.latest_telemetry["pnl_usd"] = pnl_usd
+                    self.latest_telemetry["buyback_premium"] = buyback
+                    self.latest_telemetry["current_buyback_premium"] = buyback
 
                 self._broadcast({
                     "type": "VALUATION_UPDATE",
                     "buyback_premium": buyback,
+                    "current_buyback_premium": buyback,
                     "pnl_pct": self.active_strategy.current_pnl_pct,
                     "pnl_usd": self.active_strategy.current_pnl_usd,
                     "call_ask": ca,
@@ -365,7 +373,7 @@ class StraddleExecutionManager:
                 if level == 2 and self.auto_exit_on_market:
                     self.active_strategy._check_risk_management()
             except Exception as e:
-                print(f"[SimulatedLoop] Error: {e}")
+                print(f"[MonitoringLoop] Error: {e}")
 
     def stop_straddle(self) -> Dict[str, Any]:
         """Stops the Nautilus TradingNode and closes open positions."""

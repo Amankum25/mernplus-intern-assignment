@@ -79,6 +79,9 @@ def main():
 
     # 2. Configure native Nautilus TradingNode with Bybit Data and Execution Clients
     print("[2/4] Configuring Nautilus TradingNode with native Bybit adapters...")
+    from nautilus_trader.config import InstrumentProviderConfig
+    inst_cfg = InstrumentProviderConfig(load_ids=(call_id, put_id))
+
     node_config = TradingNodeConfig(
         trader_id=TraderId("BYBIT-TRADER-001"),
         data_clients={
@@ -87,6 +90,7 @@ def main():
                 api_secret=api_secret,
                 product_types=(BybitProductType.OPTION,),
                 environment=bybit_env,
+                instrument_provider=inst_cfg,
             ),
         },
         exec_clients={
@@ -95,6 +99,7 @@ def main():
                 api_secret=api_secret,
                 product_types=(BybitProductType.OPTION,),
                 environment=bybit_env,
+                instrument_provider=inst_cfg,
             ),
         },
     )
