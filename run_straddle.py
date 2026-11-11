@@ -23,6 +23,8 @@ from nautilus_trader.adapters.bybit import (
 from nautilus_trader.adapters.bybit.factories import (
     BybitLiveDataClientFactory,
     BybitLiveExecClientFactory,
+    get_cached_bybit_http_client,
+    get_cached_bybit_instrument_provider,
 )
 from nautilus_trader.config import TradingNodeConfig
 from nautilus_trader.live.node import TradingNode
@@ -104,6 +106,14 @@ def main():
     # 3. Build Node (initializes internal engines and adapter handshakes)
     print("[3/4] Building TradingNode (reconciling cache, order emulator & venue)...")
     node.build()
+
+    # Pre-populate selected option instruments into cache
+    client = get_cached_bybit_http_client(environment=bybit_env, api_key=api_key, api_secret=api_secret)
+    provider = get_cached_bybit_instrument_provider(client=client, product_types=(BybitProductType.OPTION,))
+    provider.load_all()
+    for inst in provider.list_all():
+        if inst.id in (call_id, put_id):
+            node.cache.add_instrument(inst)
 
     # 4. Instantiate strategy and add to Trader
     strategy_config = BTCShortStraddleConfig(
