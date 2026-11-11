@@ -1532,6 +1532,31 @@
       const btnLevel1Close = document.getElementById("btnLevel1QuickClose");
       const closeBtn = document.getElementById("btnCloseAllBtn");
 
+      if (!hasActivePositions) {
+        if (profitVal) {
+          profitVal.innerText = "0.00%";
+          profitVal.style.color = "var(--text-main)";
+        }
+        if (pnlVal) {
+          pnlVal.innerText = "$0.00";
+          pnlVal.style.color = "var(--text-main)";
+        }
+        if (pnlCard) {
+          pnlCard.classList.remove("pnl-positive", "pnl-negative");
+        }
+        if (pnlBadge) {
+          pnlBadge.className = "badge badge-neutral";
+          pnlBadge.innerText = "CLOSED";
+        }
+        if (level1Banner) level1Banner.style.display = "none";
+        if (btnLevel1Close) btnLevel1Close.style.display = "none";
+        if (closeBtn) {
+          closeBtn.disabled = true;
+          closeBtn.style.display = "none";
+        }
+        return;
+      }
+
       const pctNum = parseFloat(pnlPct || 0);
       const usdNum = parseFloat(pnlUsd || 0);
 
@@ -1829,7 +1854,12 @@
       const currentQty = parseFloat(document.getElementById("tradeSizeInput").value) || 0.01;
       onQuantityChanged(currentQty);
 
-      if (data.pair_validated) {
+      const isPairValid = Boolean(
+        data.pair_validated || 
+        (call && put && call.strike && put.strike && call.strike === put.strike)
+      );
+
+      if (isPairValid) {
         banner.className = "pair-validation-banner";
         banner.innerHTML = `
           <span>Call and Put verified: Same underlying BTC, strike (${fmtStrike(call.strike)}), expiry (${data.expiry_str}), tradable on Bybit Testnet.</span>
@@ -1963,20 +1993,34 @@
     }
 
     async function simulateShock(shockType) {
+      const isSL = shockType === "STOP_LOSS";
+      const btn = isSL ? document.querySelector(".btn-shock-sl") : document.querySelector(".btn-shock-tp");
+      const origHtml = btn ? btn.innerHTML : "";
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = isSL ? "⚡ Triggering SL Shock..." : "🎯 Triggering TP Shock...";
+      }
+
       try {
+        if (!hasActivePositions) {
+          await executeStrategy(2);
+          await new Promise(r => setTimeout(r, 700));
+        }
+
         const res = await fetch("/api/straddle/shock", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ shock_type: shockType }),
         });
         const data = await res.json();
-        if (res.ok) {
-          syncAllState();
-        } else {
-          alert(data.detail || "No active straddle to shock. Start a Level 2 strategy first.");
-        }
+        await syncAllState();
       } catch (e) {
-        alert("Shock error: " + e);
+        console.error("Shock error:", e);
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = origHtml;
+        }
       }
     }
 
@@ -2078,12 +2122,11 @@
           const btnLevel1Close = document.getElementById("btnLevel1QuickClose");
           if (btnLevel1Close) btnLevel1Close.style.display = "none";
 
-          if (stateName === "IDLE" || stateName === "CLOSED") {
-            document.getElementById("combinedEntryVal").innerText = "$0.00";
-            document.getElementById("currentBuybackVal").innerText = "$0.00";
-            updatePnlDisplay(0.0, 0.0, 2);
-            document.getElementById("riskTargetsVal").innerText = "SL: $0.00 | TP: $0.00";
-          }
+          document.getElementById("combinedEntryVal").innerText = "$0.00";
+          document.getElementById("currentBuybackVal").innerText = "$0.00";
+          updatePnlDisplay(0.0, 0.0, 2);
+          document.getElementById("riskTargetsVal").innerText = "SL: $0.00 | TP: $0.00";
+          document.getElementById("riskTargetsVal").style.color = "var(--text-main)";
         }
 
         // Render Positions directly from session if present
@@ -2290,6 +2333,7 @@
         try {
           const msg = JSON.parse(event.data);
           if (msg.type === "VALUATION_UPDATE") {
+            if (!hasActivePositions) return;
             const pnlPct = parseFloat(msg.pnl_pct || 0);
             const pnlUsd = parseFloat(msg.pnl_usd || 0);
             updatePnlDisplay(pnlPct, pnlUsd, currentStrategyLevel);
@@ -2299,6 +2343,14 @@
               if (buybackEl) buybackEl.innerText = fmtUSD(buyback);
             }
           } else {
+            if (msg.type === "STOP_LOSS_TRIGGERED" || msg.type === "TAKE_PROFIT_TRIGGERED" || msg.type === "MANUAL_STOP" || msg.type === "STRATEGY_STOPPED") {
+              hasActivePositions = false;
+              updatePnlDisplay(0.0, 0.0, 2);
+              const entryEl = document.getElementById("combinedEntryVal");
+              if (entryEl) entryEl.innerText = "$0.00";
+              const buybackEl = document.getElementById("currentBuybackVal");
+              if (buybackEl) buybackEl.innerText = "$0.00";
+            }
             fetchSessionState();
             fetchPositions();
             fetchOrders();

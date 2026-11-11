@@ -133,7 +133,7 @@ def _update_session_from_event(event: Dict[str, Any]) -> None:
             session_state["active_trade"]["pnl_pct"] = event.get("pnl_pct", 0.0)
             session_state["active_trade"]["pnl_usd"] = event.get("pnl_usd", 0.0)
 
-    elif evt_type in ("STOP_LOSS_TRIGGERED", "TAKE_PROFIT_TRIGGERED", "MANUAL_STOP"):
+    elif evt_type in ("STOP_LOSS_TRIGGERED", "TAKE_PROFIT_TRIGGERED", "MANUAL_STOP", "STRATEGY_STOPPED"):
         manager.is_running = False
         manager.latest_telemetry["status"] = "CLOSED"
         buyback = event.get("buyback_premium", 0.0)
@@ -142,10 +142,7 @@ def _update_session_from_event(event: Dict[str, Any]) -> None:
         put_sym = str(manager.active_strategy.put_instrument_id).split("-OPTION")[0] if manager.active_strategy else "PUT"
         qty = float(manager.active_strategy.config.trade_size) if manager.active_strategy else 0.01
 
-        if session_state.get("active_trade"):
-            session_state["active_trade"]["status"] = "CLOSED"
-            session_state["active_trade"]["current_buyback_premium"] = buyback
-            session_state["active_trade"]["pnl_pct"] = pnl
+        session_state["active_trade"] = None
 
         session_state["orders"].extend([
             {
@@ -251,9 +248,11 @@ async def get_status():
     elif manager.is_running:
         strategy_state = "OPEN"
 
-    if session_state.get("active_trade", {}).get("status") == "CLOSED" or not manager.is_running:
+    active_trade = session_state.get("active_trade")
+    if not manager.is_running or strategy_state in ("CLOSED", "IDLE") or (active_trade or {}).get("status") == "CLOSED":
         if strategy_state != "IDLE":
             strategy_state = "CLOSED"
+        session_state["active_trade"] = None
 
     has_keys = bool(manager.api_key and manager.api_secret)
     return {
@@ -334,9 +333,12 @@ def get_session():
     elif manager.is_running:
         strategy_state = "OPEN"
 
-    if session_state.get("active_trade", {}).get("status") == "CLOSED" or not manager.is_running:
+    active_trade = session_state.get("active_trade")
+    if not manager.is_running or strategy_state in ("CLOSED", "IDLE") or (active_trade or {}).get("status") == "CLOSED":
         if strategy_state != "IDLE":
             strategy_state = "CLOSED"
+        session_state["active_trade"] = None
+        state["active_trade"] = None
 
     state["live_positions"] = _compute_live_positions()
     state["is_running"] = manager.is_running
@@ -421,7 +423,9 @@ def scale_in_straddle(req: StartStraddleRequest):
 @app.post("/api/straddle/stop")
 def stop_straddle():
     """Stops the strategy and closes all open positions."""
-    return manager.stop_straddle()
+    res = manager.stop_straddle()
+    session_state["active_trade"] = None
+    return res
 
 
 @app.get("/api/orders")
@@ -440,7 +444,9 @@ def get_positions():
 def simulate_shock(req: ShockRequest):
     """Demo helper: injects synthetic price move to trigger 1% SL or 2% TP."""
     try:
-        return manager.simulate_price_shock(req.shock_type)
+        res = manager.simulate_price_shock(req.shock_type)
+        session_state["active_trade"] = None
+        return res
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 

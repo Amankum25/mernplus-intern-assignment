@@ -83,9 +83,21 @@ class StraddleExecutionManager:
     def _broadcast(self, event: Dict[str, Any]) -> None:
         self.latest_telemetry["latest_event"] = event
         evt_type = event.get("type", "")
+        if evt_type == "VALUATION_UPDATE" and not self.is_running:
+            return
         if evt_type in ("STOP_LOSS_TRIGGERED", "TAKE_PROFIT_TRIGGERED", "MANUAL_STOP", "STRATEGY_STOPPED"):
             self.is_running = False
             self.latest_telemetry["status"] = "CLOSED"
+            self.latest_telemetry["pnl_pct"] = 0.0
+            self.latest_telemetry["pnl_usd"] = 0.0
+            self.latest_telemetry["buyback_premium"] = 0.0
+            self.latest_telemetry["current_buyback_premium"] = 0.0
+            for cb in self.listeners:
+                try:
+                    cb(event)
+                except Exception:
+                    pass
+            return
 
         if "buyback_premium" in event:
             self.latest_telemetry["buyback_premium"] = event["buyback_premium"]
@@ -364,6 +376,9 @@ class StraddleExecutionManager:
                     self.latest_telemetry["pnl_usd"] = pnl_usd
                     self.latest_telemetry["buyback_premium"] = buyback
                     self.latest_telemetry["current_buyback_premium"] = buyback
+
+                if not self.is_running or not self.active_strategy or self.active_strategy.strategy_state != StrategyState.ACTIVE_POSITION:
+                    break
 
                 self._broadcast({
                     "type": "VALUATION_UPDATE",
