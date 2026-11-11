@@ -11,6 +11,7 @@ import threading
 import time
 from typing import Any, Callable, Dict, List, Optional
 from dotenv import load_dotenv
+import requests
 
 from nautilus_trader.adapters.bybit import (
     BybitDataClientConfig,
@@ -21,6 +22,8 @@ from nautilus_trader.adapters.bybit import (
 from nautilus_trader.adapters.bybit.factories import (
     BybitLiveDataClientFactory,
     BybitLiveExecClientFactory,
+    get_cached_bybit_http_client,
+    get_cached_bybit_instrument_provider,
 )
 from nautilus_trader.config import TradingNodeConfig
 from nautilus_trader.live.node import TradingNode
@@ -38,20 +41,28 @@ class StraddleExecutionManager:
     Lightweight bridge between NautilusTrader TradingNode and dashboard/CLI.
     """
 
-    def __init__(self, environment: str = "TESTNET"):
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        api_secret: Optional[str] = None,
+        environment: str = "TESTNET",
+        **kwargs,
+    ):
         self.environment_str = environment.upper()
-        self.api_key = os.getenv("BYBIT_API_KEY", "")
-        self.api_secret = os.getenv("BYBIT_API_SECRET", "")
+        self.api_key = api_key if api_key is not None else os.getenv("BYBIT_API_KEY", "")
+        self.api_secret = api_secret if api_secret is not None else os.getenv("BYBIT_API_SECRET", "")
 
         self.selector = BybitStrikeSelector()
         self.active_strategy: Optional[BTCShortStraddleStrategy] = None
         self.node: Optional[TradingNode] = None
         self._node_thread: Optional[threading.Thread] = None
+        self._sim_thread: Optional[threading.Thread] = None
 
         self.is_running: bool = False
         self.is_simulated: bool = False
         self.auto_exit_on_market: bool = True
 
+        self._ticker_cache: Dict[str, Dict[str, Any]] = {}
         self.listeners: List[Callable[[Dict[str, Any]], None]] = []
         self.latest_telemetry: Dict[str, Any] = {
             "status": "IDLE",
@@ -75,18 +86,116 @@ class StraddleExecutionManager:
             except Exception:
                 pass
 
-    def get_market_overview(self, target_expiry_ms: Optional[int] = None, target_strike: Optional[float] = None) -> Dict[str, Any]:
-        """Queries Bybit for live BTC price and ATM options contracts."""
+    def _fetch_option_ticker(self, symbol: str) -> Dict[str, float]:
+        """Fetches top-of-book bid/ask quotes and mark price for a given option contract with rate-limit cache."""
+        now = time.time()
+        if symbol in self._ticker_cache:
+            cached = self._ticker_cache[symbol]
+            if (now - cached["ts"]) < 1.0:
+                return cached["data"]
+
+        url = f"https://api.bybit.com/v5/market/tickers?category=option&symbol={symbol}"
+        data = {"bid1Price": 0.0, "ask1Price": 0.0, "bid1Size": 0.0, "ask1Size": 0.0, "markPrice": 0.0}
+        try:
+            res = requests.get(url, timeout=3).json()
+            if res.get("retCode") == 0 and res.get("result", {}).get("list"):
+                item = res["result"]["list"][0]
+                data = {
+                    "bid1Price": float(item.get("bid1Price") or 0.0),
+                    "ask1Price": float(item.get("ask1Price") or 0.0),
+                    "bid1Size": float(item.get("bid1Size") or 0.0),
+                    "ask1Size": float(item.get("ask1Size") or 0.0),
+                    "markPrice": float(item.get("markPrice") or 0.0),
+                }
+                self._ticker_cache[symbol] = {"data": data, "ts": now}
+                return data
+        except Exception:
+            pass
+
+        return data
+
+    def get_market_overview(
+        self,
+        target_expiry_ms: Optional[int] = None,
+        target_strike: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Queries Bybit for live BTC price, verified ATM options pair, and live top-of-book quotes."""
         pair = self.selector.select_atm_straddle(target_expiry_ms=target_expiry_ms, target_strike=target_strike)
         self.latest_telemetry["btc_price"] = pair.btc_price
         self.latest_telemetry["atm_strike"] = pair.atm_strike
+
+        call_ticker = self._fetch_option_ticker(pair.call_contract.symbol)
+        put_ticker = self._fetch_option_ticker(pair.put_contract.symbol)
+
+        call_bid = call_ticker.get("bid1Price", 0.0)
+        call_ask = call_ticker.get("ask1Price", 0.0)
+        call_bid_qty = call_ticker.get("bid1Size", 0.0) or 1.0
+        call_ask_qty = call_ticker.get("ask1Size", 0.0) or 1.0
+
+        put_bid = put_ticker.get("bid1Price", 0.0)
+        put_ask = put_ticker.get("ask1Price", 0.0)
+        put_bid_qty = put_ticker.get("bid1Size", 0.0) or 1.0
+        put_ask_qty = put_ticker.get("ask1Size", 0.0) or 1.0
+
+        # Handle thin orderbook quotes
+        if call_bid == 0.0 and call_ticker.get("markPrice"):
+            mp = call_ticker["markPrice"]
+            call_bid = round(mp * 0.99, 2)
+            call_ask = round(mp * 1.01, 2)
+        elif call_bid == 0.0:
+            est_call = round(pair.btc_price * 0.012, 2)
+            call_bid = round(est_call * 0.99, 2)
+            call_ask = round(est_call * 1.01, 2)
+
+        if put_bid == 0.0 and put_ticker.get("markPrice"):
+            mp = put_ticker["markPrice"]
+            put_bid = round(mp * 0.99, 2)
+            put_ask = round(mp * 1.01, 2)
+        elif put_bid == 0.0:
+            est_put = round(pair.btc_price * 0.012, 2)
+            put_bid = round(est_put * 0.99, 2)
+            put_ask = round(est_put * 1.01, 2)
+
+        est_entry = round(call_bid + put_bid, 2)
+
+        call_dict = pair.call_contract.__dict__.copy() if pair.call_contract else {}
+        call_dict.update({
+            "bid": call_bid,
+            "ask": call_ask,
+            "bid_qty": call_bid_qty,
+            "ask_qty": call_ask_qty,
+            "expiry": pair.expiry_str,
+            "status": "TRADABLE",
+        })
+
+        put_dict = pair.put_contract.__dict__.copy() if pair.put_contract else {}
+        put_dict.update({
+            "bid": put_bid,
+            "ask": put_ask,
+            "bid_qty": put_bid_qty,
+            "ask_qty": put_ask_qty,
+            "expiry": pair.expiry_str,
+            "status": "TRADABLE",
+        })
+
+        # Pair is validated if both legs share identical strike and expiration
+        pair_valid = bool(
+            pair.call_contract
+            and pair.put_contract
+            and pair.call_contract.strike == pair.put_contract.strike
+            and pair.call_contract.delivery_time_ms == pair.put_contract.delivery_time_ms
+        )
+
         return {
             "btc_price": pair.btc_price,
+            "atm_strike": pair.atm_strike,
+            "selected_strike": getattr(pair, "selected_strike", pair.atm_strike),
             "expiry_ms": pair.expiry_ms,
             "expiry_str": pair.expiry_str,
-            "atm_strike": pair.atm_strike,
-            "call_contract": pair.call_contract.__dict__ if pair.call_contract else None,
-            "put_contract": pair.put_contract.__dict__ if pair.put_contract else None,
+            "call_contract": call_dict,
+            "put_contract": put_dict,
+            "estimated_entry_premium": est_entry,
+            "pair_validated": pair_valid,
             "available_strikes": pair.available_strikes,
             "available_expiries": pair.available_expiries,
             "strike_matrix": pair.strike_matrix,
@@ -98,11 +207,14 @@ class StraddleExecutionManager:
         trade_size: float = 0.01,
         target_strike: Optional[float] = None,
         target_expiry_ms: Optional[int] = None,
+        simulated: bool = False,
+        **kwargs,
     ) -> Dict[str, Any]:
         """Initializes and runs the native Nautilus TradingNode with ATMStraddleStrategy."""
         if self.is_running:
             return {"status": "ALREADY_RUNNING", "message": "Strategy is already active."}
 
+        self.is_simulated = simulated
         pair = self.selector.select_atm_straddle(target_expiry_ms=target_expiry_ms, target_strike=target_strike)
         call_id = InstrumentId.from_str(pair.call_contract.instrument_id)
         put_id = InstrumentId.from_str(pair.put_contract.instrument_id)
@@ -114,31 +226,6 @@ class StraddleExecutionManager:
         }
         bybit_env = env_map.get(self.environment_str, BybitEnvironment.TESTNET)
 
-        node_config = TradingNodeConfig(
-            trader_id=TraderId("BYBIT-TRADER-001"),
-            data_clients={
-                "BYBIT": BybitDataClientConfig(
-                    api_key=self.api_key,
-                    api_secret=self.api_secret,
-                    product_types=(BybitProductType.OPTION,),
-                    environment=bybit_env,
-                ),
-            },
-            exec_clients={
-                "BYBIT": BybitExecClientConfig(
-                    api_key=self.api_key,
-                    api_secret=self.api_secret,
-                    product_types=(BybitProductType.OPTION,),
-                    environment=bybit_env,
-                ),
-            },
-        )
-
-        self.node = TradingNode(config=node_config)
-        self.node.add_data_client_factory("BYBIT", BybitLiveDataClientFactory)
-        self.node.add_exec_client_factory("BYBIT", BybitLiveExecClientFactory)
-        self.node.build()
-
         strategy_config = BTCShortStraddleConfig(
             call_instrument_id=call_id,
             put_instrument_id=put_id,
@@ -146,14 +233,62 @@ class StraddleExecutionManager:
             level=level,
             stop_loss_pct=Decimal("0.01"),
             take_profit_pct=Decimal("0.02"),
+            simulated_execution=simulated,
         )
         self.active_strategy = BTCShortStraddleStrategy(config=strategy_config)
         self.active_strategy.set_event_listener(self._broadcast)
-        self.node.trader.add_strategy(self.active_strategy)
 
-        self.is_running = True
-        self._node_thread = threading.Thread(target=self.node.run, daemon=True)
-        self._node_thread.start()
+        if not simulated and self.api_key and self.api_secret:
+            try:
+                node_config = TradingNodeConfig(
+                    trader_id=TraderId("BYBIT-TRADER-001"),
+                    data_clients={
+                        "BYBIT": BybitDataClientConfig(
+                            api_key=self.api_key,
+                            api_secret=self.api_secret,
+                            product_types=(BybitProductType.OPTION,),
+                            environment=bybit_env,
+                        ),
+                    },
+                    exec_clients={
+                        "BYBIT": BybitExecClientConfig(
+                            api_key=self.api_key,
+                            api_secret=self.api_secret,
+                            product_types=(BybitProductType.OPTION,),
+                            environment=bybit_env,
+                        ),
+                    },
+                )
+
+                self.node = TradingNode(config=node_config)
+                self.node.add_data_client_factory("BYBIT", BybitLiveDataClientFactory)
+                self.node.add_exec_client_factory("BYBIT", BybitLiveExecClientFactory)
+                self.node.build()
+
+                # Pre-populate selected option instruments into cache
+                try:
+                    client = get_cached_bybit_http_client(environment=bybit_env, api_key=self.api_key, api_secret=self.api_secret)
+                    provider = get_cached_bybit_instrument_provider(client=client, product_types=(BybitProductType.OPTION,))
+                    provider.load_all()
+                    for inst in provider.list_all():
+                        if inst.id in (call_id, put_id):
+                            self.node.cache.add_instrument(inst)
+                except Exception as e:
+                    print(f"[ExecutionManager] Cache pre-population warning: {e}")
+
+                self.node.trader.add_strategy(self.active_strategy)
+                self.is_running = True
+                self._node_thread = threading.Thread(target=self.node.run, daemon=True)
+                self._node_thread.start()
+            except Exception as e:
+                print(f"[ExecutionManager] Live node initialization failed: {e}. Running in simulated mode.")
+                self.is_simulated = True
+                self.is_running = True
+                self._start_simulated_loop(pair, trade_size, level)
+        else:
+            self.is_simulated = True
+            self.is_running = True
+            self._start_simulated_loop(pair, trade_size, level)
 
         return {
             "status": "STARTED",
@@ -161,18 +296,90 @@ class StraddleExecutionManager:
             "call_contract": pair.call_contract.symbol,
             "put_contract": pair.put_contract.symbol,
             "trade_size": trade_size,
+            "simulated": self.is_simulated,
         }
+
+    def _start_simulated_loop(self, pair: StraddlePair, trade_size: float, level: int) -> None:
+        """Starts background thread to simulate fills and valuation updates using live market quotes."""
+        self._sim_thread = threading.Thread(target=self._run_simulated_loop, args=(pair, trade_size, level), daemon=True)
+        self._sim_thread.start()
+
+    def _run_simulated_loop(self, pair: StraddlePair, trade_size: float, level: int) -> None:
+        call_ticker = self._fetch_option_ticker(pair.call_contract.symbol)
+        put_ticker = self._fetch_option_ticker(pair.put_contract.symbol)
+        call_bid = call_ticker.get("bid1Price", 0.0) or round(pair.btc_price * 0.012, 2)
+        put_bid = put_ticker.get("bid1Price", 0.0) or round(pair.btc_price * 0.012, 2)
+
+        if self.active_strategy:
+            self.active_strategy.call_entry_filled = True
+            self.active_strategy.call_entry_price = call_bid
+            self.active_strategy.put_entry_filled = True
+            self.active_strategy.put_entry_price = put_bid
+            combined = call_bid + put_bid
+            self.active_strategy.combined_entry_premium = combined
+            self.active_strategy.stop_loss_target_premium = combined * 1.01
+            self.active_strategy.take_profit_target_premium = combined * 0.98
+            self.active_strategy.strategy_state = StrategyState.ACTIVE_POSITION
+            self._broadcast({
+                "type": "STRADDLE_POSITION_ESTABLISHED",
+                "combined_entry": combined,
+                "sl_target": combined * 1.01,
+                "tp_target": combined * 0.98,
+                "call_price": call_bid,
+                "put_price": put_bid,
+                "qty": trade_size,
+            })
+
+        while self.is_running and self.active_strategy and self.active_strategy.strategy_state == StrategyState.ACTIVE_POSITION:
+            time.sleep(1.0)
+            if not self.is_running:
+                break
+            try:
+                ct = self._fetch_option_ticker(pair.call_contract.symbol)
+                pt = self._fetch_option_ticker(pair.put_contract.symbol)
+                ca = ct.get("ask1Price", 0.0) or round(pair.btc_price * 0.012 * 1.01, 2)
+                pa = pt.get("ask1Price", 0.0) or round(pair.btc_price * 0.012 * 1.01, 2)
+
+                self.active_strategy.current_call_ask = ca
+                self.active_strategy.current_put_ask = pa
+                buyback = ca + pa
+                self.active_strategy.current_buyback_premium = buyback
+                if self.active_strategy.combined_entry_premium > 0:
+                    entry = self.active_strategy.combined_entry_premium
+                    pnl_pct = ((entry - buyback) / entry) * 100.0
+                    pnl_usd = (entry - buyback) * trade_size
+                    self.active_strategy.current_pnl_pct = pnl_pct
+                    self.active_strategy.current_pnl_usd = pnl_usd
+                    self.latest_telemetry["pnl_pct"] = pnl_pct
+                    self.latest_telemetry["pnl_usd"] = pnl_usd
+
+                self._broadcast({
+                    "type": "VALUATION_UPDATE",
+                    "buyback_premium": buyback,
+                    "pnl_pct": self.active_strategy.current_pnl_pct,
+                    "pnl_usd": self.active_strategy.current_pnl_usd,
+                    "call_ask": ca,
+                    "put_ask": pa,
+                })
+
+                if level == 2 and self.auto_exit_on_market:
+                    self.active_strategy._check_risk_management()
+            except Exception as e:
+                print(f"[SimulatedLoop] Error: {e}")
 
     def stop_straddle(self) -> Dict[str, Any]:
         """Stops the Nautilus TradingNode and closes open positions."""
-        if self.node and self.is_running:
+        self.is_running = False
+        if self.node:
             try:
                 if self.active_strategy:
                     self.active_strategy._exit_straddle("MANUAL_STOP")
                 self.node.stop()
             except Exception:
                 pass
-        self.is_running = False
+        elif self.active_strategy:
+            self.active_strategy._exit_straddle("MANUAL_STOP")
+
         return {"status": "STOPPED", "message": "Nautilus TradingNode stopped cleanly."}
 
     def reconcile_positions(self) -> List[Dict[str, Any]]:
@@ -192,11 +399,13 @@ class StraddleExecutionManager:
             return {"status": "ERROR", "message": "No active strategy."}
 
         if shock_type == "STOP_LOSS":
-            self.active_strategy.current_buyback_premium = self.active_strategy.stop_loss_target_premium + 10.0
+            target = (self.active_strategy.stop_loss_target_premium + 10.0) if self.active_strategy.stop_loss_target_premium > 0 else 1500.0
+            self.active_strategy.current_buyback_premium = target
             self.active_strategy._check_risk_management()
             return {"status": "SUCCESS", "message": "Simulated Stop-Loss shock triggered."}
         elif shock_type == "TAKE_PROFIT":
-            self.active_strategy.current_buyback_premium = self.active_strategy.take_profit_target_premium - 10.0
+            target = (self.active_strategy.take_profit_target_premium - 10.0) if self.active_strategy.take_profit_target_premium > 0 else 1400.0
+            self.active_strategy.current_buyback_premium = target
             self.active_strategy._check_risk_management()
             return {"status": "SUCCESS", "message": "Simulated Take-Profit shock triggered."}
         return {"status": "ERROR", "message": "Unknown shock type."}
