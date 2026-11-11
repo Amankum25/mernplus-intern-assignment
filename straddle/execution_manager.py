@@ -82,6 +82,11 @@ class StraddleExecutionManager:
 
     def _broadcast(self, event: Dict[str, Any]) -> None:
         self.latest_telemetry["latest_event"] = event
+        evt_type = event.get("type", "")
+        if evt_type in ("STOP_LOSS_TRIGGERED", "TAKE_PROFIT_TRIGGERED", "MANUAL_STOP", "STRATEGY_STOPPED"):
+            self.is_running = False
+            self.latest_telemetry["status"] = "CLOSED"
+
         if "buyback_premium" in event:
             self.latest_telemetry["buyback_premium"] = event["buyback_premium"]
             self.latest_telemetry["current_buyback_premium"] = event["buyback_premium"]
@@ -406,14 +411,15 @@ class StraddleExecutionManager:
         if not self.active_strategy:
             return {"status": "ERROR", "message": "No active strategy."}
 
+        self.is_running = False
         if shock_type == "STOP_LOSS":
             target = (self.active_strategy.stop_loss_target_premium + 10.0) if self.active_strategy.stop_loss_target_premium > 0 else 1500.0
             self.active_strategy.current_buyback_premium = target
-            self.active_strategy._check_risk_management()
+            self.active_strategy._exit_straddle("STOP_LOSS_TRIGGERED")
             return {"status": "SUCCESS", "message": "Simulated Stop-Loss shock triggered."}
         elif shock_type == "TAKE_PROFIT":
             target = (self.active_strategy.take_profit_target_premium - 10.0) if self.active_strategy.take_profit_target_premium > 0 else 1400.0
             self.active_strategy.current_buyback_premium = target
-            self.active_strategy._check_risk_management()
+            self.active_strategy._exit_straddle("TAKE_PROFIT_TRIGGERED")
             return {"status": "SUCCESS", "message": "Simulated Take-Profit shock triggered."}
         return {"status": "ERROR", "message": "Unknown shock type."}

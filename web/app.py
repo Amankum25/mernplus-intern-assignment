@@ -134,6 +134,8 @@ def _update_session_from_event(event: Dict[str, Any]) -> None:
             session_state["active_trade"]["pnl_usd"] = event.get("pnl_usd", 0.0)
 
     elif evt_type in ("STOP_LOSS_TRIGGERED", "TAKE_PROFIT_TRIGGERED", "MANUAL_STOP"):
+        manager.is_running = False
+        manager.latest_telemetry["status"] = "CLOSED"
         buyback = event.get("buyback_premium", 0.0)
         pnl = event.get("pnl_pct", 0.0)
         call_sym = str(manager.active_strategy.call_instrument_id).split("-OPTION")[0] if manager.active_strategy else "CALL"
@@ -249,6 +251,10 @@ async def get_status():
     elif manager.is_running:
         strategy_state = "OPEN"
 
+    if session_state.get("active_trade", {}).get("status") == "CLOSED" or not manager.is_running:
+        if strategy_state != "IDLE":
+            strategy_state = "CLOSED"
+
     has_keys = bool(manager.api_key and manager.api_secret)
     return {
         "status": "RUNNING" if manager.is_running else "IDLE",
@@ -327,6 +333,10 @@ def get_session():
         strategy_state = st.value if hasattr(st, "value") else str(st)
     elif manager.is_running:
         strategy_state = "OPEN"
+
+    if session_state.get("active_trade", {}).get("status") == "CLOSED" or not manager.is_running:
+        if strategy_state != "IDLE":
+            strategy_state = "CLOSED"
 
     state["live_positions"] = _compute_live_positions()
     state["is_running"] = manager.is_running

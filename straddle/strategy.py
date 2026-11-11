@@ -203,9 +203,15 @@ class BTCShortStraddleStrategy(Strategy):
 
         # Nautilus close_all_positions generates matching Market Buy orders with reduce_only=True
         if self.trader_id is not None:
-            self.close_all_positions(self.call_instrument_id)
-            self.close_all_positions(self.put_instrument_id)
-            self.stop()
+            try:
+                self.close_all_positions(self.call_instrument_id)
+                self.close_all_positions(self.put_instrument_id)
+            except Exception:
+                pass
+            try:
+                self.stop()
+            except Exception:
+                pass
 
         self.strategy_state = StrategyState.CLOSED
         self._emit(reason, {"buyback_premium": self.current_buyback_premium, "pnl_pct": self.current_pnl_pct})

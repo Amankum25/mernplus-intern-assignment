@@ -2025,10 +2025,12 @@
         const execL1 = document.getElementById("btnExecLevel1");
         const execL2 = document.getElementById("btnExecLevel2");
         const hasPositions = session.live_positions && session.live_positions.length > 0;
-        hasActivePositions = Boolean((isRunning && trade) || hasPositions);
+        const isTradeActive = Boolean(trade && trade.status === "OPEN" && isRunning && stateName !== "CLOSED");
+        hasActivePositions = Boolean(isTradeActive || hasPositions);
 
-        if ((isRunning && trade) || hasPositions) {
+        if (hasActivePositions) {
           closeBtn.disabled = false;
+          closeBtn.style.display = "inline-flex";
           execL1.disabled = false;
           execL2.disabled = false;
           execL1.innerText = "Add Position: Level 1 (Naked)";
@@ -2065,11 +2067,17 @@
             document.getElementById("riskTargetsVal").style.color = "var(--text-main)";
           }
         } else {
-          closeBtn.disabled = false;
+          closeBtn.disabled = true;
+          closeBtn.style.display = "none";
           execL1.disabled = false;
           execL2.disabled = false;
           execL1.innerText = "Execute Level 1 (Naked Straddle)";
           execL2.innerText = "Execute Level 2 (1% SL / 2% TP)";
+          const level1Banner = document.getElementById("level1ManualBanner");
+          if (level1Banner) level1Banner.style.display = "none";
+          const btnLevel1Close = document.getElementById("btnLevel1QuickClose");
+          if (btnLevel1Close) btnLevel1Close.style.display = "none";
+
           if (stateName === "IDLE" || stateName === "CLOSED") {
             document.getElementById("combinedEntryVal").innerText = "$0.00";
             document.getElementById("currentBuybackVal").innerText = "$0.00";
