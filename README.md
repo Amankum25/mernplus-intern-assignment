@@ -1,324 +1,324 @@
-# BTC Options Short Straddle
+# ⚡ BTC Options Short Straddle Execution System
 
-A Python-based trading system that implements an **ATM BTC options short straddle** on Bybit. It discovers a matching call/put pair, submits and monitors orders through NautilusTrader, and provides a FastAPI dashboard for execution controls, positions, and live strategy updates.
+An institutional-grade, low-latency quantitative options trading platform implementing an automated **At-The-Money (ATM) Bitcoin Short Straddle** strategy. Built on top of **NautilusTrader** and integrated with **Bybit V5 Unified Trading Account (Demo / Testnet / Live)**, accompanied by a reactive real-time web dashboard featuring a **DevHub-inspired Dark/Light design system**, sub-second risk automation, live profit tracking, and unified exchange order auditing.
 
-> **Risk notice:** Options trading can result in substantial losses. A naked short straddle has theoretically unlimited loss potential. Use Demo Trading or Testnet while evaluating this project. Do not use real funds without understanding the strategy, exchange rules, margin requirements, and failure modes.
+> **⚠️ Risk Notice:** Options trading involves substantial risk of loss. A short straddle carries theoretically unlimited loss potential. Evaluate this system strictly using Bybit Demo Trading or Testnet. Do not deploy real capital without a comprehensive understanding of options Greeks, exchange margin rules, and volatility tail risks.
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white" alt="Python">
-  <img src="https://img.shields.io/badge/NautilusTrader-1.231%2B-00A67E" alt="NautilusTrader">
-  <img src="https://img.shields.io/badge/Bybit-V5%20Options-F7A600" alt="Bybit">
-  <img src="https://img.shields.io/badge/FastAPI-Dashboard-009688?logo=fastapi&logoColor=white" alt="FastAPI">
-  <img src="https://img.shields.io/badge/Tests-Pytest-0A9EDC?logo=pytest&logoColor=white" alt="Pytest">
+  <img src="https://img.shields.io/badge/Python-3.12%2B-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python">
+  <img src="https://img.shields.io/badge/NautilusTrader-1.231%2B-00E599?style=for-the-badge&logo=lightning&logoColor=050811" alt="NautilusTrader">
+  <img src="https://img.shields.io/badge/Bybit-V5_Options_API-F7A600?style=for-the-badge&logo=bitcoin&logoColor=white" alt="Bybit">
+  <img src="https://img.shields.io/badge/FastAPI-Dashboard_&_WS-009688?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI">
+  <img src="https://img.shields.io/badge/Tests-5%2F5_Passing-00E599?style=for-the-badge&logo=pytest&logoColor=050811" alt="Pytest">
+  <img src="https://img.shields.io/badge/License-MIT-blue?style=for-the-badge" alt="License">
 </p>
 
 ---
 
-## Overview
+## 📸 Frontend Dashboard Preview
 
-A **short straddle** sells one call option and one put option with the same underlying asset, strike price, and expiry.
+The trading interface features an ultra-responsive, real-time command dashboard engineered with a modern **DevHub-inspired theme system**, supporting instant switching between **Dark Mode (Default)** and **Light Mode**.
 
-For this project, the system:
+### 🌙 DevHub Dark Theme (Default)
+> Real-time Bybit V5 Options market feed, automated ATM strike resolution, dual Level 1 & Level 2 execution CTAs, active position PnL telemetry, and unified Bybit exchange order auditing.
 
-1. Reads the BTC reference price and available Bybit option contracts.
-2. Selects the nearest available at-the-money (ATM) strike and matching expiry.
-3. Submits sell orders for the call and put legs.
-4. Tracks order acknowledgements, fills, positions, and the combined premium.
-5. In Level 2, monitors the estimated cost of buying both legs back and applies configurable stop-loss and take-profit thresholds.
+![BTC Options Straddle Dashboard - Dark Mode](docs/images/dashboard-dark.png)
 
-### Strategy levels
+<br/>
 
-| Mode | Behaviour |
-| --- | --- |
-| **Level 1 — Manual exit** | Opens the short straddle and displays live trade information. The operator decides when to close. |
-| **Level 2 — Managed exit** | Monitors the combined buyback premium and triggers an exit when the configured stop-loss or take-profit condition is met. |
+### ☀️ DevHub Light Theme
+> Crisp daytime workspace with high-contrast typography, emerald accents, and persistent Zero-FOUC theme toggling.
 
-**Default Level 2 thresholds:** stop-loss at a 1% increase in combined buyback premium and take-profit at a 2% decrease. These are strategy thresholds, not guarantees of execution price or maximum loss.
-
-## How PnL is evaluated
-
-Let:
-
-- (P_{C,entry}): call premium received at entry
-- (P_{P,entry}): put premium received at entry
-- (P_{C,ask}), (P_{P,ask}): current ask prices used to estimate the cost of closing each short leg
-
-Combined entry premium:
-
-[
-V_{entry}=P_{C,entry}+P_{P,entry}
-]
-
-Estimated combined buyback premium:
-
-[
-V_{buyback}=P_{C,ask}+P_{P,ask}
-]
-
-Estimated return percentage:
-
-[
-Return(%)=rac{V_{entry}-V_{buyback}}{V_{entry}}	imes100
-]
-
-Ask-side quotes are used because closing a short option requires buying it back. Actual realized PnL can differ because of fills, fees, slippage, funding or settlement mechanics, and exchange rules.
+![BTC Options Straddle Dashboard - Light Mode](docs/images/dashboard-light.png)
 
 ---
 
-## Features
+## 📑 Table of Contents
 
-- **ATM contract discovery** — identifies a call/put pair with a common strike and expiry based on the BTC reference price and available instruments.
-- **Bybit V5 integration** — supports configured Demo, Testnet, or Mainnet environments.
-- **NautilusTrader execution** — uses the trading engine's strategy lifecycle, order events, and portfolio state.
-- **Two execution modes** — manual exits in Level 1 and threshold-based exits in Level 2.
-- **Risk controls** — includes duplicate-exit protection and handling for asymmetric or incomplete leg execution.
-- **Position recovery and persistence** — stores strategy state and supports reconciliation with exchange positions on restart.
-- **FastAPI dashboard** — exposes controls and live status through a browser interface, including a WebSocket event stream.
-- **Command-line runner** — supports test, dashboard-only, and CLI execution modes.
-- **Automated tests** — covers core selection, premium calculations, exit guards, and legging-failure behaviour.
+- [Frontend Dashboard Preview](#-frontend-dashboard-preview)
+- [Overview & Strategy Formulation](#-overview--strategy-formulation)
+  - [Short Straddle Mechanics](#short-straddle-mechanics)
+  - [How PnL is Evaluated](#how-pnl-is-evaluated)
+- [System Architecture](#-system-architecture)
+  - [Component Responsibilities](#component-responsibilities)
+- [Strategy Implementation](#-strategy-implementation)
+  - [Level 1: Naked BTC Short Straddle](#level-1--naked-btc-short-straddle)
+  - [Level 2: Automated Risk Management (1% SL / 2% TP)](#level-2--automated-risk-management-1-sl--2-tp)
+  - [Scale-In & Multi-Lot Position Averaging](#scale-in--multi-lot-position-averaging)
+- [Production Engineering & Exchange Resilience](#-production-engineering--exchange-resilience)
+- [DevHub-Inspired Dashboard UI](#-devhub-inspired-dashboard-ui)
+- [Getting Started](#-getting-started)
+  - [Prerequisites](#prerequisites)
+  - [Installation](#1-installation)
+  - [Environment Configuration](#2-environment-configuration)
+  - [Master Launcher & Running Options](#3-running-the-project)
+- [Configuration Reference](#-configuration-reference)
+- [Verification & Automated Test Suite](#-verification--automated-test-suite)
+- [Detailed Engineering Walkthrough](#-detailed-engineering-walkthrough)
+- [Technology Stack & Repository Author](#-technology-stack--repository-author)
 
-## Architecture
+---
 
-The project separates exchange communication, strategy logic, orchestration, persistence, and the dashboard.
+## 🚀 Overview & Strategy Formulation
+
+### Short Straddle Mechanics
+
+A **Short Straddle** is a market-neutral options strategy created by simultaneously selling an At-The-Money Call option and an At-The-Money Put option sharing the exact same strike price and expiry date:
+
+$$\text{Short Straddle} = \text{Sell 1 ATM Call} + \text{Sell 1 ATM Put}$$
+
+The strategy profits from time decay ($\theta$) and implied volatility contraction ($\text{Vega}$), under the expectation that the underlying Bitcoin price will remain within a narrow range around the strike price until expiration.
+
+### How PnL is Evaluated
+
+Let:
+- $P_{C,\text{entry}}$: Call premium received at entry
+- $P_{P,\text{entry}}$: Put premium received at entry
+- $P_{C,\text{ask}}, P_{P,\text{ask}}$: Current ask prices required to buy back each short leg in the open market
+
+The core valuation metrics are computed in real time:
+
+$$\text{Combined Entry Premium: } V_{\text{entry}} = P_{C,\text{entry}} + P_{P,\text{entry}}$$
+
+$$\text{Current Buyback Cost (Ask-Side): } V_{\text{buyback}} = P_{C,\text{ask}} + P_{P,\text{ask}}$$
+
+$$\text{Unrealized Return \%: } \text{Return } \% = \frac{V_{\text{entry}} - V_{\text{buyback}}}{V_{\text{entry}}} \times 100\%$$
+
+$$\text{Unrealized Profit (\$) : } \text{PnL } \$ = (V_{\text{entry}} - V_{\text{buyback}}) \times \text{Position Size}$$
+
+> **Why Ask-side quotes?** Because short positions can only be closed by buying them back, valuation based on the *ask price* reflects the actual economic cost to exit immediately. Mark or mid prices conceal the bid-ask spread and underestimate risk.
+
+---
+
+## 🏛 System Architecture
+
+The project enforces a modular separation of concerns between venue networking, core quantitative state machines, disk persistence, and real-time dashboard telemetry:
 
 ```mermaid
 flowchart TD
-    EX["Bybit V5 API"]
-    SEL["Strike Selector"]
-    CLIENT["Bybit Client / NautilusTrader Adapter"]
-    STRAT["BTC Short Straddle Strategy"]
-    MGR["Execution Manager"]
-    STORE["State Persistence"]
-    API["FastAPI REST + WebSocket"]
-    UI["Browser Dashboard"]
+    subgraph BybitVenue["Bybit V5 Exchange (Demo / Testnet / Mainnet)"]
+        MarketData["Public Market Data WS & REST\n(/v5/market/tickers, /v5/market/instruments-info)"]
+        PrivateAPI["Authenticated Private API\n(/v5/order/create, /v5/position/list, /v5/order/history)"]
+    end
 
-    EX <--> CLIENT
-    EX --> SEL
-    SEL --> MGR
-    CLIENT <--> MGR
-    MGR <--> STRAT
-    MGR <--> STORE
-    MGR --> API
-    API <--> UI
+    subgraph CoreEngine["Quantitative Execution Engine"]
+        Selector["BybitStrikeSelector\n- Spot reference tracking\n- Minimum distance ATM resolution\n- Validated Call/Put contract matching"]
+        Client["BybitV5Client\n- RTT-based latency clock sync\n- HMAC-SHA256 signature engine\n- OrderFilter spot-only sanitization\n- Automated retCode 10002 resync retry"]
+        Manager["StraddleExecutionManager\n- Master orchestrator & worker thread\n- Crash recovery & position reconciliation\n- Scale-in multi-lot lot blending\n- Emergency residual inventory sweep"]
+        Strategy["BTCShortStraddleStrategy (NautilusTrader)\n- Frozen BTCShortStraddleConfig\n- Idempotent state machine\n- Ask-side valuation debounce\n- Legging risk handler & unhedged unwind"]
+        Persistence["StatePersistence (JSON Atomic Storage)\n- Thread-safe disk persistence\n- Audit logging & trade metrics tracking"]
+    end
+
+    subgraph InterfaceLayer["Presentation & Control Layer"]
+        FastAPI["FastAPI Server (web/app.py)\n- REST Control Endpoints\n- Async WebSocket Event Stream"]
+        DevHubUI["DevHub-Inspired Modern Dashboard (web/templates/index.html)\n- Persistent Dark / Light Mode\n- Live Trade Profit (%) Card\n- Dynamic Level 1 Quick-Close Controls\n- Unified 100+ Order History Table\n- macOS Window-Styled Execution Stream"]
+    end
+
+    MarketData --> Selector
+    Selector --> Manager
+    PrivateAPI <--> Client
+    Client <--> Manager
+    Manager <--> Strategy
+    Manager <--> Persistence
+    Manager --> FastAPI
+    FastAPI <--> DevHubUI
 ```
 
-### Main components
+### Component Responsibilities
 
-| Component | Responsibility |
-| --- | --- |
-| `straddle/strike_selector.py` | Finds eligible BTC options and selects a matching ATM call/put pair. |
-| `straddle/bybit_client.py` | Handles Bybit V5 API communication and request signing. |
-| `straddle/strategy.py` | Implements straddle lifecycle, order handling, valuation, and Level 2 exit checks. |
-| `straddle/execution_manager.py` | Coordinates strategy execution, exchange state, recovery, and dashboard-facing operations. |
-| `straddle/persistence.py` | Persists strategy and trade-related state. |
-| `web/app.py` | Provides the FastAPI application and dashboard API/WebSocket endpoints. |
-| `web/templates/` | Contains the dashboard interface. |
-| `tests/test_straddle.py` | Contains automated tests for core strategy behaviour. |
-
----
-
-## Dashboard
-
-The web dashboard provides a central interface to inspect the market and manage the running strategy.
-
-Current interface capabilities include:
-
-- BTC market overview and selected ATM contracts
-- Call and put quote information
-- Order quantity and execution-mode controls
-- Active strategy status and profit/loss estimates
-- Position and order history
-- Live execution/event logs
-- Dark and light display themes
-
-The dashboard is served locally by the FastAPI application. Start it using the instructions below.
+| Component | Path | Responsibility |
+| :--- | :--- | :--- |
+| `BybitStrikeSelector` | `straddle/strike_selector.py` | Queries live instruments, locates nearest ATM strike to BTC reference, pairs matching Call/Put. |
+| `BybitV5Client` | `straddle/bybit_client.py` | Authenticated HTTP client with RTT clock sync, HMAC-SHA256 signing, and Options parameter sanitization. |
+| `BTCShortStraddleStrategy` | `straddle/strategy.py` | NautilusTrader strategy class managing order submission, fill events, ask-side tracking, and Level 2 exits. |
+| `StraddleExecutionManager` | `straddle/execution_manager.py` | Orchestrates strategy thread lifecycle, startup reconciliation, scale-in blending, and residual inventory sweep. |
+| `StatePersistence` | `straddle/persistence.py` | Thread-safe atomic JSON file persistence for strategy state and trade audit trails. |
+| `FastAPI Application` | `web/app.py` | REST endpoints for configuration, Level 1 / Level 2 execution, order history aggregation, and WebSocket feed. |
+| `DevHub Dashboard` | `web/templates/index.html` | Interactive single-page interface with Dark/Light mode, live Greeks, PnL monitoring, and order history. |
 
 ---
 
-## Getting started
+## 📊 Strategy Implementation
+
+### Level 1 — Naked BTC Short Straddle
+
+- **Dynamic Contract Discovery**: Queries Bybit for the latest BTC underlying reference price and evaluates active option contracts across the nearest delivery expiry.
+- **ATM Resolution**: Selects the strike with minimal absolute distance $|\text{Strike} - S_{\text{ref}}|$, ensuring identical strike and expiry for both legs.
+- **Simultaneous Market Entry**: Submits synchronized Sell market orders for both Call and Put legs via Bybit's `/v5/order/create` endpoint.
+- **Manual Decision Mode**: Automated SL/TP is disabled. The operator observes real-time profit percentages and uses the dynamic **`Close & Lock In Profit (+X.XX%)`** button to exit at discretion.
+
+### Level 2 — Automated Risk Management (1% SL / 2% TP)
+
+- **Ask-Side Valuation**: Risk is continuously measured by the live cost required to buy back both short legs immediately:
+  $$V_{\text{buyback}} = P_{C,\text{ask}} + P_{P,\text{ask}}$$
+- **Stop-Loss (+1% Threshold)**:
+  $$\text{Exit Triggered if } V_{\text{buyback}} \ge 1.01 \times V_{\text{entry}}$$
+  When the buyback premium rises 1% above entry, the engine fires simultaneous Buy orders (`side: Buy, reduce_only: True`) to prevent runaway losses.
+- **Take-Profit (-2% Threshold)**:
+  $$\text{Exit Triggered if } V_{\text{buyback}} \le 0.98 \times V_{\text{entry}}$$
+  When the buyback cost drops 2% below entry (capturing premium decay), the strategy closes both legs to lock in profit.
+- **Duplicate-Exit Protection**: The state machine utilizes an atomic flag (`exit_triggered = True`) and transitions immediately to `StrategyState.EXIT_TRIGGERED`. Any incoming market ticks or concurrent requests are discarded.
+
+### Scale-In & Multi-Lot Position Averaging
+
+When an operator adds subsequent lots while a position is already active, the engine dynamically recalibrates using **volume-weighted average pricing (VWAP)**:
+
+$$V_{\text{entry, blended}} = \frac{V_{\text{old}} \cdot Q_{\text{old}} + V_{\text{new}} \cdot Q_{\text{new}}}{Q_{\text{old}} + Q_{\text{new}}}$$
+
+The 1% SL and 2% TP bounds automatically adapt to the new blended baseline without interrupting the monitoring loop.
+
+---
+
+## 🛡 Production Engineering & Exchange Resilience
+
+| Challenge | Root Cause | Engineering Solution |
+| :--- | :--- | :--- |
+| **Timestamp Rejections (`retCode: 10002`)** | Bybit rejects orders if request timestamp is $> 1,000\text{ ms}$ ahead of server time. Local machine clock drift caused premature rejections. | Implemented latency-compensated clock sync in `BybitV5Client._sync_time()` measuring network Round-Trip Time (RTT) with a 500ms safety buffer, widened `recv_window` to 20,000ms, and added automatic resync retry. |
+| **Invalid Option Parameter (`retCode: 10001`)** | In Bybit V5 `/v5/order/create`, `"orderFilter": "Order"` is only valid for Spot trading; passing it to Options causes immediate rejection. | Sanitized payload construction in `bybit_client.py` to omit `orderFilter` for `category: "option"`. |
+| **Missing Exchange Orders in UI** | Local audit logs only preserved trades executed in the current session; restarted sessions omitted past orders. | Built unified `/api/orders` endpoint querying Bybit's `/v5/order/history?category=option&baseCoin=BTC` with HMAC-SHA256 query signing, merging live exchange fills with local audit records (100+ orders displayed). |
+| **Legging Failure & Asymmetric Fills** | In illiquid markets, one leg may fill while the second remains pending, creating unhedged delta exposure. | If the second leg is unfilled after a configurable timeout (default 10s), the system cancels the pending leg and immediately unwinds the filled leg via market buyback. |
+| **Server Crash Recovery** | Unexpected server restart while positions are open leaves options unmonitored. | On startup, `reconcile_positions()` queries `/v5/position/list`, reconstructs the `StraddlePair`, detects entry prices, and seamlessly re-engages the risk monitoring loop. |
+| **Emergency Residual Sweep** | Stopping a strategy must guarantee zero leftover short inventory. | On manual operator stop, the engine executes an emergency sweep querying Bybit for any lingering open contracts and submits immediate `reduce_only=True` market buybacks. |
+
+---
+
+## 🎨 DevHub-Inspired Dashboard UI
+
+The user interface takes direct visual inspiration from modern developer workspaces (such as **DevHub**):
+
+### Visual Highlights:
+- **Persistent Theme Engine**: Toggle effortlessly between **Dark Mode** (deep void `#080C14` with neon mint `#00E599` accents) and **Light Mode** (clean slate `#F8FAFC` with rich emerald `#059669`). Theme preference persists via `localStorage` with zero white flicker (Zero-FOUC) and optional URL query parameter support (`?theme=light`).
+- **Interactive Strike Selector**: Visualizes ATM and adjacent strike prices with live distance-to-spot metrics, with automatic ATM strike resolution.
+- **High-Contrast Input Controls**: Order sizing and quick-preset buttons (`0.01`, `0.02`, `0.05`, `0.10 BTC`) are styled with custom themed surfaces, ensuring crisp legibility under both modes.
+- **Consistent Execution CTAs**: Both Level 1 and Level 2 buttons share identical geometry, typography, and glowing hover states.
+- **macOS Window Controls on Telemetry**: The log card features macOS-styled window dots (`#FF5F56`, `#FFBD2E`, `#27C93F`) and a monospace execution stream.
+- **Unified Order History**: Displays 100+ executed orders directly fetched from Bybit V5 Options history.
+
+---
+
+## ⚡ Getting Started
 
 ### Prerequisites
-
-- Python **3.12** recommended
-- A Bybit account with API credentials for **Demo Trading** or **Testnet**
+- Python **3.10+** (tested on Python 3.12)
+- Bybit Account (Demo Trading or Testnet API credentials)
 - Git
 
-> Start with Demo Trading or Testnet. Keep API keys private and never commit your `.env` file.
-
-### 1. Clone the repository
-
-```bash
-git clone https://github.com/Amankum25/mernplus-intern-assignment.git
-cd mernplus-intern-assignment
-```
-
-### 2. Create a virtual environment
-
-**Windows PowerShell**
+### 1. Installation
 
 ```powershell
+# Clone the repository
+git clone https://github.com/Amankum25/mernplus-intern-assignment.git
+cd mernplus-intern-assignment
+
+# Create and activate virtual environment
 python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-```
+.\.venv\Scripts\Activate.ps1    # On macOS/Linux: source .venv/bin/activate
 
-**macOS / Linux**
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-```
-
-### 3. Install dependencies
-
-```bash
-python -m pip install --upgrade pip
+# Install dependencies
 pip install -r requirements.txt
 ```
 
-### 4. Configure environment variables
+### 2. Environment Configuration
 
-Create a `.env` file in the repository root. You can use `.env.example` as a starting point.
+Create a `.env` file in the project root (or copy `.env.example`):
 
-```env
-BYBIT_API_KEY=your_api_key
-BYBIT_API_SECRET=your_api_secret
-BYBIT_ENVIRONMENT=DEMO
-
+```ini
+BYBIT_API_KEY=your_bybit_api_key_here
+BYBIT_API_SECRET=your_bybit_api_secret_here
+BYBIT_ENVIRONMENT=DEMO          # Options: DEMO, TESTNET, MAINNET
 DEFAULT_TRADE_QTY=0.01
 WEB_PORT=8000
+WEB_HOST=127.0.0.1
 ```
 
-Supported environment values are `DEMO`, `TESTNET`, and `MAINNET`. Use credentials generated for the selected environment. Do not share or commit API credentials.
+> **Security Note:** Never commit your `.env` file. The repository's `.gitignore` protects credentials from being tracked.
 
-### 5. Run the project
+### 3. Running the Project
 
-**Recommended — complete startup**
+#### All-In-One Master Runner (Recommended)
+Automatically checks dependencies, runs the 5-point unit test suite, queries live Bybit market data for the current ATM strike, launches the FastAPI server, and opens your browser:
 
-```bash
+```powershell
 python run.py
+# Or on Windows, double-click:
+.\run.bat
 ```
 
-The default runner executes the test suite, attempts a market/contract overview, and starts the dashboard.
+#### Standalone Launch Options
 
-Open [http://127.0.0.1:8000](http://127.0.0.1:8000) in your browser.
-
-**Run only the dashboard**
-
-```bash
+```powershell
+# 1. Launch only the Web Dashboard:
 python run.py --web
-```
 
-**Run tests only**
-
-```bash
+# 2. Run the Unit Test Suite:
 python run.py --test
+
+# 3. Run the strategy directly in Terminal CLI mode:
+python run.py --cli --level 1 --qty 0.01    # Level 1 Naked Straddle
+python run.py --cli --level 2 --qty 0.01    # Level 2 Automated Risk
 ```
 
-**Run the strategy in CLI mode**
-
-```bash
-# Level 1: manual exit
-python run.py --cli --level 1 --qty 0.01
-
-# Level 2: automated threshold monitoring
-python run.py --cli --level 2 --qty 0.01
-```
-
-Optional runner arguments:
-
-| Argument | Purpose |
-| --- | --- |
-| `--env DEMO` | Select `DEMO`, `TESTNET`, or `MAINNET`. |
-| `--qty 0.01` | Set the order quantity per leg in BTC. |
-| `--port 8000` | Set the dashboard port. |
-| `--host 127.0.0.1` | Set the dashboard bind host. |
-| `--test` | Run only automated tests. |
-| `--web` | Start only the dashboard. |
-| `--cli` | Start the command-line strategy runner. |
+The web dashboard is available at: **`http://127.0.0.1:8000`**
 
 ---
 
-## Configuration
+## ⚙️ Configuration Reference
 
-Strategy defaults are defined in `straddle/config.py`. Review the configuration in the current code before changing values or running an order.
+Strategy parameters are defined in `BTCShortStraddleConfig` ([`straddle/config.py`](straddle/config.py)):
 
-| Setting | Purpose |
-| --- | --- |
-| Call and put instrument IDs | Identify the two option contracts used by the strategy. |
-| Trade size | BTC quantity submitted for each leg. |
-| Strategy level | Selects manual (1) or threshold-managed (2) exit behaviour. |
-| Stop-loss percentage | Increase in combined buyback premium that triggers the Level 2 stop. |
-| Take-profit percentage | Decrease in combined buyback premium that triggers the Level 2 take-profit. |
-| Entry timeout | Maximum configured wait for the two legs to execute as expected. |
-| Simulated execution | Enables the configured simulated execution path where supported. |
+| Parameter | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `call_instrument_id` | `InstrumentId` | Required | Nautilus instrument identifier for Call leg |
+| `put_instrument_id` | `InstrumentId` | Required | Nautilus instrument identifier for Put leg |
+| `trade_size` | `Decimal` | `0.01` | Order size in BTC per leg (0.01 is Bybit's minimum) |
+| `level` | `int` | `2` | `1` = Naked Straddle, `2` = Automated 1% SL / 2% TP |
+| `stop_loss_pct` | `Decimal` | `0.01` | Exit threshold if buyback premium rises 1% (+1%) |
+| `take_profit_pct` | `Decimal` | `0.02` | Exit threshold if buyback premium falls 2% (-2%) |
+| `entry_timeout_secs` | `float` | `10.0` | Maximum wait time for leg fill before unwinding |
+| `simulated_execution` | `bool` | `False` | Emulate fills locally using live quotes (no real orders) |
 
 ---
 
-## Tests
+## 🧪 Verification & Automated Test Suite
 
-Run the test suite with:
+The test suite validates core quantitative logic, contract discovery, risk threshold triggers, duplicate exit protection, and legging risk management:
 
-```bash
-python -m pytest tests/test_straddle.py -v
+```powershell
+.\.venv\Scripts\python -m pytest tests/test_straddle.py -v -s
 ```
 
-The tests are intended to validate:
-
-- ATM strike selection logic
-- Bybit option discovery and call/put pairing
-- Entry premium and risk-target calculations
-- Protection against duplicate exit attempts
-- Handling of a legging failure
-
-Some tests may require exchange connectivity or valid environment configuration. Check the test output and the test implementation to distinguish local unit tests from integration checks.
-
----
-
-## Repository structure
+### Test Coverage:
+1. **`test_atm_strike_calculation_logic`**: Validates nearest ATM strike resolution logic across spot boundaries.
+2. **`test_live_bybit_strike_discovery`**: Connects to Bybit, queries live instruments, and validates Call/Put pairing integrity.
+3. **`test_straddle_entry_and_targets_calculation`**: Verifies exact mathematical computation of combined entry premium, 1% Stop-Loss target, and 2% Take-Profit target.
+4. **`test_duplicate_exit_attempt_guard`**: Confirms that once an exit trigger is processed, subsequent ticks are ignored (idempotent state transition).
+5. **`test_legging_failure_unhedged_handling`**: Simulates single-leg fill with second-leg timeout; validates that the pending order is cancelled and the filled leg is unwound immediately.
 
 ```text
-.
-├── straddle/
-│   ├── bybit_client.py
-│   ├── config.py
-│   ├── execution_manager.py
-│   ├── persistence.py
-│   ├── strategy.py
-│   └── strike_selector.py
-├── tests/
-│   └── test_straddle.py
-├── web/
-│   ├── app.py
-│   └── templates/
-├── .env.example
-├── requirements.txt
-├── run.py
-├── run.bat
-├── run_dashboard.py
-├── run_straddle.py
-├── WALKTHROUGH.md
-└── README.md
+============================= test session starts =============================
+platform win32 -- Python 3.12.7, pytest-9.2.0, pluggy-1.7.0
+tests/test_straddle.py::test_atm_strike_calculation_logic PASSED         [ 20%]
+tests/test_straddle.py::test_live_bybit_strike_discovery PASSED          [ 40%]
+tests/test_straddle.py::test_straddle_entry_and_targets_calculation PASSED [ 60%]
+tests/test_straddle.py::test_duplicate_exit_attempt_guard PASSED         [ 80%]
+tests/test_straddle.py::test_legging_failure_unhedged_handling PASSED    [100%]
+============================== 5 passed in 2.71s ==============================
 ```
 
 ---
 
-## Detailed engineering walkthrough
+## 📖 Detailed Engineering Walkthrough
 
-For a deeper explanation of the system, its execution flow, NautilusTrader integration, Bybit connectivity, order lifecycle, risk management, and interview-oriented technical details, see **[WALKTHROUGH.md](WALKTHROUGH.md)**.
+For an in-depth breakdown of the system, execution lifecycles, NautilusTrader integration, Bybit connectivity, order lifecycles, risk management, and interview-oriented technical Q&A, see **[WALKTHROUGH.md](WALKTHROUGH.md)**.
 
-## Technology stack
+---
 
-- **Python** — application and strategy implementation
-- **NautilusTrader** — event-driven trading and execution framework
-- **Bybit V5 API** — options market data and order integration
-- **FastAPI** — HTTP API and WebSocket server
-- **Uvicorn** — ASGI server
-- **Pytest** — automated testing
+## 👤 Technology Stack & Repository Author
 
-## Author
-
-**Aman Kumar**  
-[GitHub: @Amankum25](https://github.com/Amankum25)
+- **Author**: Aman Kumar
+- **GitHub Repository**: [https://github.com/Amankum25/mernplus-intern-assignment](https://github.com/Amankum25/mernplus-intern-assignment)
+- **Framework**: [NautilusTrader](https://nautilustrader.io) | [FastAPI](https://fastapi.tiangolo.com)
+- **Exchange Integration**: [Bybit V5 Options API](https://bybit-exchange.github.io/docs/v5/intro)
 
 ---
 

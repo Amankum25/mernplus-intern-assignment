@@ -13,7 +13,8 @@
   <script>
     // Immediate Theme Initialization (prevents flash of white in dark mode)
     (function() {
-      const saved = localStorage.getItem('straddle_theme') || 'dark';
+      const urlTheme = new URLSearchParams(window.location.search).get('theme');
+      const saved = urlTheme || localStorage.getItem('straddle_theme') || 'dark';
       document.documentElement.setAttribute('data-theme', saved);
     })();
   </script>
@@ -1610,7 +1611,8 @@
     // DEVHUB THEME SYSTEM (DARK / LIGHT MODE)
     // =========================================================================
     function initTheme() {
-      const saved = localStorage.getItem("straddle_theme") || "dark";
+      const urlTheme = new URLSearchParams(window.location.search).get('theme');
+      const saved = urlTheme || localStorage.getItem("straddle_theme") || "dark";
       setTheme(saved);
     }
 
