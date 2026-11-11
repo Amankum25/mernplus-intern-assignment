@@ -1,104 +1,133 @@
 """
-Command-line entry point for running the strategy without the web dashboard.
-Useful for headless testing or running on a server.
+Official NautilusTrader BTC Options Straddle Live Runner.
+
+Uses native NautilusTrader TradingNode, BybitDataClient, and BybitExecutionClient
+adapters to trade an automated ATM Bitcoin Short Straddle on Bybit Testnet/Demo/Mainnet.
 
 Usage:
-    python run_straddle.py --level 2 --qty 0.01 --env DEMO
+    python run_straddle.py --level 2 --qty 0.01 --env TESTNET
 """
 
 import argparse
+from decimal import Decimal
 import os
 import sys
-import time
 from dotenv import load_dotenv
 
-from straddle.execution_manager import StraddleExecutionManager
+from nautilus_trader.adapters.bybit import (
+    BybitDataClientConfig,
+    BybitExecClientConfig,
+    BybitEnvironment,
+    BybitProductType,
+)
+from nautilus_trader.adapters.bybit.factories import (
+    BybitLiveDataClientFactory,
+    BybitLiveExecClientFactory,
+)
+from nautilus_trader.config import TradingNodeConfig
+from nautilus_trader.live.node import TradingNode
+from nautilus_trader.model.identifiers import InstrumentId, TraderId
+
+from straddle.config import BTCShortStraddleConfig
+from straddle.strategy import BTCShortStraddleStrategy
+from straddle.strike_selector import BybitStrikeSelector
 
 load_dotenv()
 
 
 def main():
-    # parse CLI args
-    parser = argparse.ArgumentParser(description="NautilusTrader BTC Options Straddle CLI Runner")
-    parser.add_argument("--level", type=int, default=2, choices=[1, 2], help="1: Naked Straddle, 2: Automated SL/TP")
-    parser.add_argument("--qty", type=float, default=float(os.getenv("DEFAULT_TRADE_QTY", 0.01)), help="Trade size in BTC")
-    parser.add_argument("--env", type=str, default=os.getenv("BYBIT_ENVIRONMENT", "DEMO"), choices=["DEMO", "TESTNET", "MAINNET"], help="Bybit environment")
-    parser.add_argument("--simulated", action="store_true", help="Run with simulated fills against live market quotes")
+    parser = argparse.ArgumentParser(description="NautilusTrader BTC Options Straddle Live Runner")
+    parser.add_argument("--level", type=int, default=2, choices=[1, 2], help="1: Naked Straddle, 2: Automated 1%% SL / 2%% TP")
+    parser.add_argument("--qty", type=float, default=float(os.getenv("DEFAULT_TRADE_QTY", "0.01")), help="Trade size in BTC")
+    parser.add_argument("--env", type=str, default=os.getenv("BYBIT_ENVIRONMENT", "TESTNET").upper(), choices=["DEMO", "TESTNET", "MAINNET"], help="Bybit environment")
 
     args = parser.parse_args()
 
-    print("\n" + "=" * 70)
-    print("   NAUTILUSTRADER BTC SHORT STRADDLE STRATEGY RUNNER")
+    print("\n" + "=" * 75)
+    print("   ⚡ NAUTILUSTRADER BTC SHORT STRADDLE — OFFICIAL BYBIT LIVE RUNNER")
     print(f"   Mode         : Level {args.level} ({'Naked Straddle' if args.level == 1 else 'Automated 1% SL / 2% TP'})")
     print(f"   Environment  : Bybit {args.env}")
     print(f"   Order Size   : {args.qty} BTC per leg")
-    print("=" * 70 + "\n")
+    print("=" * 75 + "\n")
 
-    # 1. query Bybit for current BTC price and nearest ATM straddle pair
-    manager = StraddleExecutionManager(environment=args.env)
+    api_key = os.getenv("BYBIT_API_KEY")
+    api_secret = os.getenv("BYBIT_API_SECRET")
 
-    print("[1/4] Discovering BTC Reference Price & Options Chain from Bybit...")
-    market = manager.get_market_overview()
-    print(f"      -> Current BTC Reference Price: ${market['btc_price']:,.2f}")
-    print(f"      -> Target Expiration: {market['expiry_str']}")
-    print(f"      -> Nearest ATM Strike: ${market['atm_strike']:,.2f}")
-    print(f"      -> Selected Call Leg: {market['call_contract']['symbol']}")
-    print(f"      -> Selected Put Leg:  {market['put_contract']['symbol']}\n")
+    # Resolve environment enum
+    env_map = {
+        "TESTNET": BybitEnvironment.TESTNET,
+        "DEMO": BybitEnvironment.DEMO,
+        "MAINNET": BybitEnvironment.MAINNET,
+    }
+    bybit_env = env_map.get(args.env, BybitEnvironment.TESTNET)
 
-    # 2. register a console listener so strategy events print to stdout
-    print(f"[2/4] Initializing Straddle Strategy [Level {args.level}]...")
+    # 1. Discover current BTC Spot price & nearest ATM Call/Put contracts
+    print("[1/4] Discovering live BTC options chain and nearest ATM strike...")
+    selector = BybitStrikeSelector()
+    pair = selector.select_atm_straddle()
 
-    def console_listener(event):
-        """Prints strategy lifecycle events directly to the terminal."""
-        t_type = event.get("type")
-        if t_type == "ORDER_SUBMITTED":
-            print(f"  [ORDER SUBMITTED] {event.get('order_side')} {event.get('client_order_id')} on {event.get('instrument_id')}")
-        elif t_type == "ORDER_ACCEPTED":
-            print(f"  [ORDER ACKNOWLEDGED] {event.get('client_order_id')} -> Venue ID: {event.get('venue_order_id')}")
-        elif t_type == "ORDER_FILLED":
-            print(f"  [ORDER EXECUTED] {event.get('client_order_id')} @ ${event.get('fill_price'):.2f} (Qty: {event.get('fill_qty')})")
-        elif t_type == "STRADDLE_POSITION_ESTABLISHED":
-            print("\n" + "*" * 60)
-            print(f"  [STRADDLE ACTIVE] Combined Entry Premium: ${event.get('combined_entry_premium'):.2f}")
-            if args.level == 2:
-                print(f"  [RISK BOUNDS] Stop-Loss (+1%): ${event.get('stop_loss_target'):.2f} | Take-Profit (-2%): ${event.get('take_profit_target'):.2f}")
-            print("*" * 60 + "\n")
-        elif t_type == "VALUATION_UPDATE":
-            # live ticking line — overwrites itself in-place using \r
-            pnl = event.get("pnl_pct", 0.0)
-            pnl_sign = "+" if pnl >= 0 else ""
-            sys.stdout.write(
-                f"\r  [TICK] Buyback: ${event.get('current_buyback_premium'):.2f} "
-                f"(Ask C: ${event.get('call_ask'):.1f} | Ask P: ${event.get('put_ask'):.1f}) "
-                f"| PnL: {pnl_sign}{pnl:.2f}% (${event.get('pnl_usd', 0):.2f})  "
-            )
-            sys.stdout.flush()
-        elif t_type == "EXIT_TRIGGERED":
-            print(f"\n\n  >>> [EXIT TRIGGERED] {event.get('reason')} <<<")
-            print(f"      Buyback: ${event.get('current_buyback_premium'):.2f} vs Entry: ${event.get('combined_entry_premium'):.2f}")
-            print(f"      Net PnL: {event.get('pnl_pct'):.2f}%")
-        elif t_type == "STRADDLE_CLOSED":
-            print(f"  [STRADDLE COMPLETED] All positions successfully closed! Reason: {event.get('reason')}\n")
+    print(f"      -> Current BTC Spot Price: ${pair.btc_price:,.2f}")
+    print(f"      -> Target Expiration     : {pair.expiry_str}")
+    print(f"      -> Selected ATM Strike   : ${pair.atm_strike:,.2f}")
+    print(f"      -> Selected Call Leg     : {pair.call_contract.symbol}")
+    print(f"      -> Selected Put Leg      : {pair.put_contract.symbol}\n")
 
-    manager.register_listener(console_listener)
+    call_id = InstrumentId.from_str(pair.call_contract.instrument_id)
+    put_id = InstrumentId.from_str(pair.put_contract.instrument_id)
 
-    # 3. start the strategy — this spawns the background market loop thread
-    print("[3/4] Launching Execution Engine & Live Market Feed...")
-    manager.start_straddle(
-        level=args.level,
-        trade_size=args.qty,
-        simulated=args.simulated or (not os.getenv("BYBIT_API_KEY")),
+    # 2. Configure native Nautilus TradingNode with Bybit Data and Execution Clients
+    print("[2/4] Configuring Nautilus TradingNode with native Bybit adapters...")
+    node_config = TradingNodeConfig(
+        trader_id=TraderId("BYBIT-TRADER-001"),
+        data_clients={
+            "BYBIT": BybitDataClientConfig(
+                api_key=api_key,
+                api_secret=api_secret,
+                product_types=(BybitProductType.OPTION,),
+                environment=bybit_env,
+            ),
+        },
+        exec_clients={
+            "BYBIT": BybitExecClientConfig(
+                api_key=api_key,
+                api_secret=api_secret,
+                product_types=(BybitProductType.OPTION,),
+                environment=bybit_env,
+            ),
+        },
     )
 
-    print("[4/4] Strategy is running. Press Ctrl+C to stop.\n")
+    node = TradingNode(config=node_config)
+    node.add_data_client_factory("BYBIT", BybitLiveDataClientFactory)
+    node.add_exec_client_factory("BYBIT", BybitLiveExecClientFactory)
 
-    # 4. keep the main thread alive; Ctrl+C triggers graceful shutdown
+    # 3. Build Node (initializes internal engines and adapter handshakes)
+    print("[3/4] Building TradingNode (reconciling cache, order emulator & venue)...")
+    node.build()
+
+    # 4. Instantiate strategy and add to Trader
+    strategy_config = BTCShortStraddleConfig(
+        call_instrument_id=call_id,
+        put_instrument_id=put_id,
+        trade_size=Decimal(str(args.qty)),
+        level=args.level,
+        stop_loss_pct=Decimal("0.01"),
+        take_profit_pct=Decimal("0.02"),
+    )
+    strategy = BTCShortStraddleStrategy(config=strategy_config)
+    node.trader.add_strategy(strategy)
+
+    print("[4/4] Starting NautilusTrader Engine...")
+    print(f"      -> Entering short straddle: Sell {args.qty} Call & {args.qty} Put")
+    print(f"      -> SL (+1%): Buyback >= Entry * 1.01 | TP (-2%): Buyback <= Entry * 0.98")
+    print("      -> Press Ctrl+C to stop.\n")
+
     try:
-        while manager.is_running:
-            time.sleep(1)
+        node.run()
     except KeyboardInterrupt:
-        print("\n\nStopping strategy and closing open positions...")
-        manager.stop_straddle()
+        print("\nStopping TradingNode...")
+        node.stop()
+        node.dispose()
         print("Shutdown complete.")
 
 

@@ -98,28 +98,26 @@ The project enforces a modular separation of concerns between venue networking, 
 flowchart TD
     subgraph BybitVenue["Bybit V5 Exchange (Demo / Testnet / Mainnet)"]
         MarketData["Public Market Data WS & REST\n(/v5/market/tickers, /v5/market/instruments-info)"]
-        PrivateAPI["Authenticated Private API\n(/v5/order/create, /v5/position/list, /v5/order/history)"]
+        PrivateAPI["Authenticated Private API & WS\n(BybitDataClient & BybitExecutionClient)"]
     end
 
-    subgraph CoreEngine["Quantitative Execution Engine"]
+    subgraph CoreEngine["NautilusTrader Quantitative Engine"]
         Selector["BybitStrikeSelector\n- Spot reference tracking\n- Minimum distance ATM resolution\n- Validated Call/Put contract matching"]
-        Client["BybitV5Client\n- RTT-based latency clock sync\n- HMAC-SHA256 signature engine\n- OrderFilter spot-only sanitization\n- Automated retCode 10002 resync retry"]
-        Manager["StraddleExecutionManager\n- Master orchestrator & worker thread\n- Crash recovery & position reconciliation\n- Scale-in multi-lot lot blending\n- Emergency residual inventory sweep"]
-        Strategy["BTCShortStraddleStrategy (NautilusTrader)\n- Frozen BTCShortStraddleConfig\n- Idempotent state machine\n- Ask-side valuation debounce\n- Legging risk handler & unhedged unwind"]
-        Persistence["StatePersistence (JSON Atomic Storage)\n- Thread-safe disk persistence\n- Audit logging & trade metrics tracking"]
+        Node["TradingNode (Nautilus)\n- Built-in BybitDataClient & BybitExecClient\n- LiveExecEngine startup reconciliation\n- Portfolio state & order lifecycle"]
+        Strategy["BTCShortStraddleStrategy (NautilusTrader)\n- Pure Strategy subclass\n- Native order_factory.market() & submit_order()\n- Real-time ask-side quote valuation\n- Built-in close_all_positions() for 1% SL / 2% TP"]
     end
 
     subgraph InterfaceLayer["Presentation & Control Layer"]
+        Manager["StraddleExecutionManager\n- Lightweight TradingNode bridge"]
         FastAPI["FastAPI Server (web/app.py)\n- REST Control Endpoints\n- Async WebSocket Event Stream"]
-        DevHubUI["DevHub-Inspired Modern Dashboard (web/templates/index.html)\n- Persistent Dark / Light Mode\n- Live Trade Profit (%) Card\n- Dynamic Level 1 Quick-Close Controls\n- Unified 100+ Order History Table\n- macOS Window-Styled Execution Stream"]
+        DevHubUI["DevHub-Inspired Modern Dashboard (web/templates/index.html)\n- Persistent Dark / Light Mode\n- Live Trade Profit (%) Card\n- Dynamic Level 1 Quick-Close Controls"]
     end
 
     MarketData --> Selector
-    Selector --> Manager
-    PrivateAPI <--> Client
-    Client <--> Manager
-    Manager <--> Strategy
-    Manager <--> Persistence
+    Selector --> Node
+    PrivateAPI <--> Node
+    Node <--> Strategy
+    Node --> Manager
     Manager --> FastAPI
     FastAPI <--> DevHubUI
 ```
@@ -129,11 +127,11 @@ flowchart TD
 | Component | Path | Responsibility |
 | :--- | :--- | :--- |
 | `BybitStrikeSelector` | `straddle/strike_selector.py` | Queries live instruments, locates nearest ATM strike to BTC reference, pairs matching Call/Put. |
-| `BybitV5Client` | `straddle/bybit_client.py` | Authenticated HTTP client with RTT clock sync, HMAC-SHA256 signing, and Options parameter sanitization. |
-| `BTCShortStraddleStrategy` | `straddle/strategy.py` | NautilusTrader strategy class managing order submission, fill events, ask-side tracking, and Level 2 exits. |
-| `StraddleExecutionManager` | `straddle/execution_manager.py` | Orchestrates strategy thread lifecycle, startup reconciliation, scale-in blending, and residual inventory sweep. |
-| `StatePersistence` | `straddle/persistence.py` | Thread-safe atomic JSON file persistence for strategy state and trade audit trails. |
-| `FastAPI Application` | `web/app.py` | REST endpoints for configuration, Level 1 / Level 2 execution, order history aggregation, and WebSocket feed. |
+| `BTCShortStraddleStrategy` | `straddle/strategy.py` | Native NautilusTrader Strategy managing order submission, fill events, ask-side tracking, and Level 2 exits. |
+| `BTCShortStraddleConfig` | `straddle/config.py` | Frozen StrategyConfig holding instrument IDs, trade size, and SL/TP percentage thresholds. |
+| `TradingNode Runner` | `run_straddle.py` | Official Bybit Live runner configuring `BybitDataClientConfig` & `BybitExecClientConfig` and launching `TradingNode`. |
+| `StraddleExecutionManager` | `straddle/execution_manager.py` | Lightweight bridge managing `TradingNode` lifecycle for the web dashboard. |
+| `FastAPI Application` | `web/app.py` | REST endpoints for configuration, Level 1 / Level 2 execution, order history, and WebSocket feed. |
 | `DevHub Dashboard` | `web/templates/index.html` | Interactive single-page interface with Dark/Light mode, live Greeks, PnL monitoring, and order history. |
 
 ---
