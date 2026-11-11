@@ -1,6 +1,6 @@
 """
-CLI Runner for NautilusTrader BTC Options Short Straddle.
-Supports Level 1 (Naked Straddle) and Level 2 (Automated Risk Management: 1% SL / 2% TP).
+Command-line entry point for running the strategy without the web dashboard.
+Useful for headless testing or running on a server.
 
 Usage:
     python run_straddle.py --level 2 --qty 0.01 --env DEMO
@@ -18,6 +18,7 @@ load_dotenv()
 
 
 def main():
+    # parse CLI args
     parser = argparse.ArgumentParser(description="NautilusTrader BTC Options Straddle CLI Runner")
     parser.add_argument("--level", type=int, default=2, choices=[1, 2], help="1: Naked Straddle, 2: Automated SL/TP")
     parser.add_argument("--qty", type=float, default=float(os.getenv("DEFAULT_TRADE_QTY", 0.01)), help="Trade size in BTC")
@@ -33,6 +34,7 @@ def main():
     print(f"   Order Size   : {args.qty} BTC per leg")
     print("=" * 70 + "\n")
 
+    # 1. query Bybit for current BTC price and nearest ATM straddle pair
     manager = StraddleExecutionManager(environment=args.env)
 
     print("[1/4] Discovering BTC Reference Price & Options Chain from Bybit...")
@@ -43,9 +45,11 @@ def main():
     print(f"      -> Selected Call Leg: {market['call_contract']['symbol']}")
     print(f"      -> Selected Put Leg:  {market['put_contract']['symbol']}\n")
 
+    # 2. register a console listener so strategy events print to stdout
     print(f"[2/4] Initializing Straddle Strategy [Level {args.level}]...")
 
     def console_listener(event):
+        """Prints strategy lifecycle events directly to the terminal."""
         t_type = event.get("type")
         if t_type == "ORDER_SUBMITTED":
             print(f"  [ORDER SUBMITTED] {event.get('order_side')} {event.get('client_order_id')} on {event.get('instrument_id')}")
@@ -60,6 +64,7 @@ def main():
                 print(f"  [RISK BOUNDS] Stop-Loss (+1%): ${event.get('stop_loss_target'):.2f} | Take-Profit (-2%): ${event.get('take_profit_target'):.2f}")
             print("*" * 60 + "\n")
         elif t_type == "VALUATION_UPDATE":
+            # live ticking line — overwrites itself in-place using \r
             pnl = event.get("pnl_pct", 0.0)
             pnl_sign = "+" if pnl >= 0 else ""
             sys.stdout.write(
@@ -77,6 +82,7 @@ def main():
 
     manager.register_listener(console_listener)
 
+    # 3. start the strategy — this spawns the background market loop thread
     print("[3/4] Launching Execution Engine & Live Market Feed...")
     manager.start_straddle(
         level=args.level,
@@ -86,6 +92,7 @@ def main():
 
     print("[4/4] Strategy is running. Press Ctrl+C to stop.\n")
 
+    # 4. keep the main thread alive; Ctrl+C triggers graceful shutdown
     try:
         while manager.is_running:
             time.sleep(1)
@@ -97,4 +104,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

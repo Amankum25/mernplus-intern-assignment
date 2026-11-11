@@ -1,5 +1,7 @@
 """
-Run the NautilusTrader BTC Options Straddle FastAPI Dashboard.
+Entry point for the web dashboard.
+Starts a Uvicorn ASGI server and serves the FastAPI app on the configured port.
+
 Usage:
     python run_dashboard.py --port 8000 --env DEMO
 """
@@ -9,11 +11,11 @@ import os
 import uvicorn
 from dotenv import load_dotenv
 
-# Load .env if present
 load_dotenv()
 
 
 def main():
+    # parse CLI args for port, host, and environment
     parser = argparse.ArgumentParser(description="BTC Options Straddle Web Dashboard")
     parser.add_argument("--port", type=int, default=int(os.getenv("WEB_PORT", 8000)), help="Port to run server on")
     parser.add_argument("--host", type=str, default="127.0.0.1", help="Host interface")
@@ -21,6 +23,7 @@ def main():
 
     args = parser.parse_args()
 
+    # pass env to web/app.py via environment variable so it's available on import
     os.environ["BYBIT_ENVIRONMENT"] = args.env
 
     print("=" * 70)
@@ -29,9 +32,9 @@ def main():
     print(f"  Dashboard URL      : http://{args.host}:{args.port}")
     print("=" * 70)
 
+    # start the ASGI server — reload=False for production stability
     uvicorn.run("web.app:app", host=args.host, port=args.port, reload=False, log_level="info")
 
 
 if __name__ == "__main__":
     main()
-

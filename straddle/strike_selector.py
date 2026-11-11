@@ -1,7 +1,7 @@
 """
-BTC Options ATM Strike Selector
-Identifies available Bybit BTC option contracts, queries the BTC reference price,
-and determines the nearest At-The-Money (ATM) strike to pair Call and Put options.
+Figures out which BTC option contracts to trade.
+Queries Bybit's options chain, finds the current BTC price, and picks the Call and Put
+at the nearest ATM (At-The-Money) strike.
 """
 
 import datetime
@@ -15,18 +15,26 @@ from nautilus_trader.model.identifiers import InstrumentId
 
 @dataclass
 class OptionContractInfo:
-    symbol: str
-    instrument_id: str
-    strike: float
-    option_type: str  # "CALL" or "PUT"
-    delivery_time_ms: int
-    expiry_str: str
-    min_order_qty: float
-    price_tick_size: float
+    """
+    Holds metadata for a single Bybit BTC option contract.
+    Parsed from Bybit's instruments-info API response.
+    """
+    symbol: str               # e.g., "BTC-28MAR25-85000-C-USDT"
+    instrument_id: str        # Nautilus format: "BTC-28MAR25-85000-C-USDT-OPTION.BYBIT"
+    strike: float             # strike price in USD
+    option_type: str          # "CALL" or "PUT"
+    delivery_time_ms: int     # expiry timestamp in epoch milliseconds
+    expiry_str: str           # human-readable expiry like "2025-03-28 08:00 UTC"
+    min_order_qty: float      # minimum contract size (usually 0.01 BTC on Bybit)
+    price_tick_size: float    # smallest price increment (usually $5.00)
 
 
 @dataclass
 class StraddlePair:
+    """
+    The result of ATM strike selection — holds the matched Call and Put contracts
+    at the same strike and expiry, plus supporting data for the UI.
+    """
     btc_price: float
     expiry_ms: int
     expiry_str: str
@@ -41,8 +49,8 @@ class StraddlePair:
 
 class BybitStrikeSelector:
     """
-    Identifies available Bybit BTC option contracts, discovers the nearest
-    ATM strike based on the BTC reference price, and pairs matching Call and Put contracts.
+    Queries Bybit's public API to find the best ATM straddle pair.
+    No auth required — everything here uses public market data endpoints.
     """
 
     def __init__(self, base_url: str = "https://api.bybit.com"):
@@ -55,15 +63,16 @@ class BybitStrikeSelector:
 
     def get_btc_reference_price(self) -> float:
         """
-        Fetch the current BTC underlying reference price from Bybit.
-        Uses BTCUSDT linear ticker last/index price or option index price.
+        Gets the current BTC price from Bybit.
+        Tries the BTCUSDT perpetual first (most liquid), falls back to option index price.
+        Cached for 2.5 seconds so we don't hammer the API on every tick.
         """
         now = time.time()
         if self._cached_price > 0 and (now - self._cached_price_ts) < 2.5:
             return self._cached_price
 
         try:
-            # Query linear perpetual for live BTC reference price
+            # Primary: BTCUSDT linear perpetual — tightest spread, most reliable price
             url = f"{self.base_url}/v5/market/tickers?category=linear&symbol=BTCUSDT"
             res = self.session.get(url, timeout=3).json()
             if res.get("retCode") == 0 and res.get("result", {}).get("list"):
@@ -76,8 +85,8 @@ class BybitStrikeSelector:
         except Exception as e:
             print(f"[StrikeSelector] Failed to fetch linear BTCUSDT price: {e}")
 
-        # Fallback to option tickers
         try:
+            # Fallback: BTC option index price — slightly less responsive but still reliable
             url = f"{self.base_url}/v5/market/tickers?category=option&baseCoin=BTC"
             res = self.session.get(url, timeout=3).json()
             if res.get("retCode") == 0 and res.get("result", {}).get("list"):
@@ -90,13 +99,13 @@ class BybitStrikeSelector:
         except Exception as e:
             print(f"[StrikeSelector] Failed to fetch option tickers: {e}")
 
-        # If offline or rate limited, return fallback
+        # If both sources fail, return last known price or a safe default
         return self._cached_price if self._cached_price > 0 else 75000.0
 
     def get_all_option_contracts(self) -> List[OptionContractInfo]:
         """
-        Fetch all active BTC option contracts from Bybit instruments-info endpoint.
-        Uses in-memory caching to prevent API rate limits and optimize response times.
+        Fetches all active BTC option contracts from Bybit.
+        Cached for 45 seconds — the options chain doesn't change that fast.
         """
         now = time.time()
         if self._cached_contracts and (now - self._cached_contracts_ts) < 45.0:
@@ -115,16 +124,16 @@ class BybitStrikeSelector:
 
             for item in res["result"]["list"]:
                 delivery_time_ms = int(item.get("deliveryTime", 0))
-                # Ignore expired contracts
+                # skip expired contracts
                 if delivery_time_ms <= now_ms:
                     continue
 
                 raw_symbol = item["symbol"]  # e.g., BTC-7NOV26-75750-C-USDT
-                options_type = item.get("optionsType", "").upper()  # "CALL" or "PUT"
+                options_type = item.get("optionsType", "").upper()
                 if not options_type:
                     options_type = "CALL" if "-C" in raw_symbol else "PUT"
 
-                # Parse strike price
+                # parse strike from the symbol name (3rd segment after splitting by "-")
                 parts = raw_symbol.split("-")
                 strike = 0.0
                 if len(parts) >= 3:
@@ -177,17 +186,10 @@ class BybitStrikeSelector:
         override_btc_price: Optional[float] = None,
     ) -> StraddlePair:
         """
-        Determines the nearest ATM strike based on BTC reference price and returns
-        the matching Call and Put contracts.
+        Core method: finds the nearest ATM strike and returns the matched Call + Put pair.
 
-        Parameters
-        ----------
-        target_expiry_ms : int, optional
-            The specific expiry timestamp (ms) to target. If None, picks the nearest future expiry.
-        target_strike : float, optional
-            A manually selected strike price if desired, otherwise defaults to the calculated ATM strike.
-        override_btc_price : float, optional
-            Use a manual reference price for testing.
+        ATM selection uses: min(strikes, key=lambda s: abs(s - btc_price))
+        That just means "pick the strike closest to the current BTC price."
         """
         btc_price = override_btc_price if override_btc_price is not None else self.get_btc_reference_price()
         contracts = self.get_all_option_contracts()
@@ -195,7 +197,7 @@ class BybitStrikeSelector:
         if not contracts:
             raise RuntimeError("No active BTC option contracts found on Bybit.")
 
-        # Identify all unique future expiries
+        # collect unique expiry dates
         expiry_map: Dict[int, str] = {}
         for c in contracts:
             if c.delivery_time_ms not in expiry_map:
@@ -204,24 +206,23 @@ class BybitStrikeSelector:
         sorted_expiries = sorted(expiry_map.keys())
         available_expiries = [{"timestamp": exp, "label": expiry_map[exp]} for exp in sorted_expiries]
 
-        # Select target expiry
+        # default to nearest expiry if none specified
         if target_expiry_ms and target_expiry_ms in expiry_map:
             chosen_expiry = target_expiry_ms
         else:
             chosen_expiry = sorted_expiries[0]
 
-        # Filter contracts for chosen expiry
         contracts_at_expiry = [c for c in contracts if c.delivery_time_ms == chosen_expiry]
         strikes = sorted(list(set(c.strike for c in contracts_at_expiry)))
 
         if not strikes:
             raise RuntimeError(f"No strikes found for expiry {expiry_map[chosen_expiry]}")
 
-        # Calculate nearest ATM strike to BTC reference price
+        # pick the strike mathematically closest to current BTC price
         atm_strike = min(strikes, key=lambda s: abs(s - btc_price))
         chosen_strike = target_strike if (target_strike is not None and target_strike in strikes) else atm_strike
 
-        # Find matching Call and Put for this strike
+        # find the Call and Put contracts at this strike
         call_contract = next(
             (c for c in contracts_at_expiry if c.strike == chosen_strike and c.option_type == "CALL"),
             None,
@@ -231,12 +232,13 @@ class BybitStrikeSelector:
             None,
         )
 
+        # a straddle must have BOTH legs — if either is missing something is wrong with the data
         if not call_contract or not put_contract:
             raise RuntimeError(
                 f"Could not find matching Call and Put for strike {chosen_strike} at expiry {expiry_map[chosen_expiry]}"
             )
 
-        # Build detailed strike matrix for ATM visualization
+        # build a ±3 strike matrix around ATM for the UI strike selector
         atm_idx = strikes.index(atm_strike)
         start_idx = max(0, atm_idx - 3)
         end_idx = min(len(strikes), atm_idx + 4)
@@ -268,4 +270,3 @@ class BybitStrikeSelector:
             strike_matrix=strike_matrix,
             selected_strike=chosen_strike,
         )
-

@@ -1,19 +1,23 @@
 """
-FastAPI Web Application and Dashboard for NautilusTrader BTC Options Straddle.
-Provides REST and WebSocket endpoints for controlling the strategy,
-monitoring live market quotes, tracking positions, and reviewing the 10-Question Walkthrough.
+FastAPI server that powers the web dashboard.
+Exposes REST endpoints to control the strategy and a WebSocket endpoint
+to stream live events to the browser in real time.
 """
 
 import asyncio
+import datetime
 from decimal import Decimal
 import json
 import os
 from typing import Any, Dict, List, Optional
+from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+
+load_dotenv()
 
 from straddle.execution_manager import StraddleExecutionManager
 from straddle.persistence import state_persistence
@@ -22,7 +26,7 @@ from straddle.strike_selector import BybitStrikeSelector
 
 app = FastAPI(title="NautilusTrader BTC Options Straddle Dashboard")
 
-# Enable CORS
+# allow the dashboard (served from any origin) to call these endpoints
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -31,20 +35,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize Execution Manager (defaults to DEMO trading as requested)
+# one shared manager instance — defaults to DEMO environment
 default_env = os.getenv("BYBIT_ENVIRONMENT", "DEMO")
 manager = StraddleExecutionManager(environment=default_env)
 
-# Active WebSocket connections
+# all currently connected browser WebSocket clients
 connected_websockets: List[WebSocket] = []
 
 
 def on_telemetry_event(event: Dict[str, Any]) -> None:
-    """Callback triggered whenever strategy state, quote, or order changes."""
-    # Broadcast to all connected WebSockets
+    """
+    Called by the strategy/execution manager whenever something happens
+    (order fill, valuation update, SL/TP trigger, etc.).
+    Pushes the event as JSON to every connected browser tab.
+    Background threads can't await coroutines directly, so we use run_coroutine_threadsafe.
+    """
     if connected_websockets:
         message = json.dumps(event, default=str)
-        # Schedule sending to active sockets
         for ws in connected_websockets:
             try:
                 asyncio.run_coroutine_threadsafe(ws.send_text(message), event_loop)
@@ -55,26 +62,33 @@ def on_telemetry_event(event: Dict[str, Any]) -> None:
 manager.register_listener(on_telemetry_event)
 
 
-# Request schemas
+# -----------------------------------------------------------------------------
+# Request / Response Schemas
+# -----------------------------------------------------------------------------
+
 class ConfigRequest(BaseModel):
+    """Payload for updating Bybit API credentials or switching environments."""
     api_key: Optional[str] = None
     api_secret: Optional[str] = None
     environment: str = "DEMO"  # DEMO or TESTNET
 
 
 class StartStraddleRequest(BaseModel):
-    level: int = 2  # 1: Level 1 Naked Straddle, 2: Level 2 Automated Risk Management
-    trade_size: float = 0.01  # Min 0.01 BTC
-    simulated: bool = False
+    """Payload to launch a straddle or add size to an existing one."""
+    level: int = 2            # 1 = naked, 2 = automated SL/TP
+    trade_size: float = 0.01  # BTC per leg
+    simulated: bool = False   # True = emulate fills using live quotes, no real orders
     target_expiry_ms: Optional[int] = None
     target_strike: Optional[float] = None
 
 
 class ShockRequest(BaseModel):
+    """Payload for triggering a demo price shock to test SL or TP."""
     shock_type: str  # "STOP_LOSS" or "TAKE_PROFIT"
 
 
 class AutoExitRequest(BaseModel):
+    """Toggle between live market auto-exit and demo hold mode."""
     enabled: bool
 
 
@@ -84,7 +98,7 @@ class AutoExitRequest(BaseModel):
 
 @app.get("/api/status")
 async def get_status():
-    """Returns engine state, connection, and strategy progress."""
+    """Engine health, Bybit connection status, and current strategy state."""
     strategy_state = "IDLE"
     if manager.active_strategy:
         st = manager.active_strategy.strategy_state
@@ -92,7 +106,7 @@ async def get_status():
     elif manager.is_running:
         strategy_state = "OPEN"
 
-    # Verify Bybit private API authentication
+    # check if our API key actually works
     bybit_auth = False
     bybit_conn = False
     if manager.bybit_client:
@@ -121,7 +135,7 @@ async def get_status():
 
 @app.post("/api/connection/test")
 async def test_connection():
-    """Tests Bybit Testnet connectivity and private API authentication."""
+    """Tests Bybit API key authentication by calling the wallet balance endpoint."""
     auth_ok = False
     details = "Public market data is active."
     if manager.bybit_client:
@@ -146,7 +160,10 @@ async def test_connection():
 
 @app.get("/api/session")
 def get_session():
-    """Returns persistent session state: active trade, logs history, trade history, and stats."""
+    """
+    Returns the full persistent session state: active trade, orders, logs, history, and stats.
+    Also auto-reconciles open Bybit positions if the strategy isn't currently tracking them.
+    """
     state = state_persistence.get_full_state()
     strategy_state = "IDLE"
     if manager.active_strategy:
@@ -163,7 +180,7 @@ def get_session():
         except Exception:
             pass
 
-    # Auto-reconcile open Bybit positions into active strategy if not currently tracking
+    # if Bybit shows open positions but we're not tracking them (e.g. server restarted), reconcile
     if live_positions and not manager.is_running:
         try:
             reconciled = manager.reconcile_positions()
@@ -173,7 +190,7 @@ def get_session():
         except Exception:
             pass
 
-    # Authoritative cleanup: if strategy is IDLE or CLOSED and no live positions exist, clear stale active_trade display
+    # if strategy is idle and there are no live positions, don't show a stale active trade
     if strategy_state in ["IDLE", "CLOSED"] and not live_positions:
         state["active_trade"] = None
 
@@ -187,7 +204,7 @@ def get_session():
 
 @app.post("/api/logs/clear")
 def clear_logs():
-    """Clears persistent log history."""
+    """Clears the in-memory and on-disk log history."""
     with state_persistence.lock:
         state_persistence.state["logs"] = []
         state_persistence._save_to_disk(state_persistence.state)
@@ -196,7 +213,7 @@ def clear_logs():
 
 @app.get("/api/account")
 def get_account():
-    """Returns Bybit Demo/Testnet account balance and margin status."""
+    """Returns Bybit account balance and margin info."""
     if manager.bybit_client:
         try:
             res = manager.bybit_client.get_wallet_balance()
@@ -219,7 +236,7 @@ def get_account():
 
 @app.get("/api/market")
 def get_market(expiry_ms: Optional[int] = None, strike: Optional[float] = None):
-    """Returns live BTC reference price, expiration dates, and ATM strike chain."""
+    """Returns live BTC price, available strikes, and ATM straddle quotes."""
     try:
         overview = manager.get_market_overview(target_expiry_ms=expiry_ms, target_strike=strike)
         return overview
@@ -229,7 +246,7 @@ def get_market(expiry_ms: Optional[int] = None, strike: Optional[float] = None):
 
 @app.post("/api/config")
 def update_config(req: ConfigRequest):
-    """Updates Bybit API keys and switches environment (DEMO / TESTNET)."""
+    """Swaps in new API credentials or changes environment. Stops any running strategy first."""
     global manager
     was_running = manager.is_running
     if was_running:
@@ -246,7 +263,7 @@ def update_config(req: ConfigRequest):
 
 @app.post("/api/straddle/start")
 def start_straddle(req: StartStraddleRequest):
-    """Starts the BTC ATM Short Straddle strategy."""
+    """Starts the BTC ATM Short Straddle. If one is already running, adds to the position instead."""
     try:
         res = manager.start_straddle(
             level=req.level,
@@ -262,7 +279,7 @@ def start_straddle(req: StartStraddleRequest):
 
 @app.post("/api/straddle/scale-in")
 def scale_in_straddle(req: StartStraddleRequest):
-    """Adds to the active straddle position (multi-lot scale in)."""
+    """Adds more size to the active straddle position."""
     try:
         return manager.scale_in_straddle(additional_size=req.trade_size)
     except Exception as e:
@@ -271,20 +288,95 @@ def scale_in_straddle(req: StartStraddleRequest):
 
 @app.post("/api/straddle/stop")
 def stop_straddle():
-    """Stops the strategy and closes open straddle positions."""
+    """Stops the strategy and closes all open positions."""
     return manager.stop_straddle()
 
 
 @app.get("/api/orders")
 def get_orders():
-    """Returns order history from persistent storage."""
+    """
+    Returns the comprehensive order list.
+    When running live/demo, fetches actual executed and historical option orders from Bybit V5
+    and combines them with local audit logs, ensuring no orders are omitted.
+    """
+    orders_map: Dict[str, Dict[str, Any]] = {}
+
+    # 1. Populate from persistent local storage
     state = state_persistence.get_full_state()
-    return state.get("orders", [])
+    for o in state.get("orders", []):
+        key = o.get("order_id") or o.get("client_order_id")
+        if key:
+            orders_map[str(key)] = dict(o)
+
+    # 2. Fetch live Bybit exchange orders (both historical and realtime)
+    if manager.bybit_client and not manager.is_simulated:
+        try:
+            # Query Bybit V5 Option Order History
+            hist_res = manager.bybit_client.get_order_history(base_coin="BTC", limit=50)
+            if hist_res.get("retCode") == 0:
+                bybit_list = hist_res.get("result", {}).get("list", [])
+                for b_ord in bybit_list:
+                    oid = b_ord.get("orderId")
+                    link_id = b_ord.get("orderLinkId")
+                    created_ms = int(b_ord.get("createdTime", 0))
+                    if created_ms:
+                        time_str = datetime.datetime.fromtimestamp(
+                            created_ms / 1000.0, tz=datetime.timezone.utc
+                        ).strftime("%H:%M:%S")
+                    else:
+                        time_str = "--"
+
+                    avg_px = float(b_ord.get("avgPrice") or b_ord.get("price", 0.0))
+                    qty = float(b_ord.get("qty", 0.0))
+                    filled_qty = float(b_ord.get("cumExecQty", 0.0))
+                    status = b_ord.get("orderStatus", "NEW").upper()
+
+                    bybit_entry = {
+                        "order_id": oid,
+                        "order_link_id": link_id,
+                        "time": time_str,
+                        "contract": b_ord.get("symbol"),
+                        "side": b_ord.get("side", "").upper(),
+                        "qty": qty,
+                        "filled_qty": filled_qty,
+                        "avg_price": avg_px,
+                        "status": status,
+                        "created_ms": created_ms,
+                        "source": "BYBIT",
+                    }
+
+                    # If this Bybit order corresponds to a local client order ID, merge and remove duplicate
+                    if link_id and link_id in orders_map:
+                        orders_map.pop(link_id, None)
+
+                    orders_map[oid] = bybit_entry
+        except Exception:
+            pass
+
+    # Sort newest to oldest so operator sees latest orders first
+    def _order_sort_key(o: Dict[str, Any]) -> float:
+        if o.get("created_ms"):
+            return float(o["created_ms"]) / 1000.0
+        t_str = str(o.get("time") or o.get("updated_at") or "")
+        try:
+            parts = t_str.split(":")
+            if len(parts) == 3:
+                return float(parts[0]) * 3600.0 + float(parts[1]) * 60.0 + float(parts[2])
+        except Exception:
+            pass
+        return 0.0
+
+    order_list = list(orders_map.values())
+    order_list.sort(key=_order_sort_key, reverse=True)
+    return order_list
 
 
 @app.get("/api/positions")
 def get_positions():
-    """Returns active Bybit option positions directly from exchange or active trade."""
+    """
+    Returns open positions from Bybit (live) or from the tracked active trade (simulated).
+    If we have API keys, we always prefer the live Bybit source.
+    """
     if manager.bybit_client and not manager.is_simulated:
         try:
             res = manager.bybit_client.get_open_positions("BTC")
@@ -293,8 +385,8 @@ def get_positions():
                 return positions
         except Exception:
             pass
-    
-    # Return active trade positions only if strategy is actively running
+
+    # fallback: reconstruct position list from the active trade in persistent state
     st_val = ""
     if manager.active_strategy:
         st = manager.active_strategy.strategy_state
@@ -325,7 +417,10 @@ def get_positions():
 
 @app.post("/api/straddle/shock")
 def simulate_shock(req: ShockRequest):
-    """Demonstrates automated Stop-Loss (+1%) or Take-Profit (-2%) by simulating a price move."""
+    """
+    Demo helper: injects a synthetic price move to trigger either the 1% SL or 2% TP.
+    Useful for showing the automated exit during an interview or demo.
+    """
     try:
         return manager.simulate_price_shock(req.shock_type)
     except Exception as e:
@@ -334,14 +429,14 @@ def simulate_shock(req: ShockRequest):
 
 @app.post("/api/straddle/auto-exit-mode")
 def set_auto_exit_mode(req: AutoExitRequest):
-    """Toggles automated exit on live market noise vs on-demand interviewer shock demo."""
+    """Toggles whether the strategy auto-exits on live market moves vs only on demand."""
     manager.auto_exit_on_market = req.enabled
     return {"status": "SUCCESS", "auto_exit_on_market": manager.auto_exit_on_market}
 
 
 @app.get("/api/walkthrough")
 async def get_walkthrough():
-    """Returns the comprehensive answers to all 10 interview questions."""
+    """Returns the architectural Q&A for the 10 interview questions about the system."""
     return {
         "questions": [
             {
@@ -478,12 +573,12 @@ async def get_walkthrough():
 
 
 # -------------------------------------------------------------------------
-# Web Dashboard Frontend
+# Dashboard HTML
 # -------------------------------------------------------------------------
 
 @app.get("/", response_class=HTMLResponse)
 async def get_index():
-    """Serves the main HTML dashboard."""
+    """Serves the main dashboard HTML page."""
     template_path = os.path.join(os.path.dirname(__file__), "templates", "index.html")
     if os.path.exists(template_path):
         with open(template_path, "r", encoding="utf-8") as f:
@@ -497,15 +592,18 @@ async def get_index():
 
 @app.websocket("/ws/stream")
 async def websocket_endpoint(websocket: WebSocket):
-    """Real-time WebSocket connection streaming strategy state and quotes."""
+    """
+    Real-time event stream for the dashboard.
+    On connect, sends the current state snapshot so the UI initializes immediately.
+    Then keeps the connection open and receives keepalive pings.
+    """
     await websocket.accept()
     connected_websockets.append(websocket)
     try:
-        # Send initial snapshot
+        # send current snapshot immediately so the UI doesn't start blank
         await websocket.send_text(json.dumps(manager.latest_telemetry, default=str))
         while True:
-            # Keepalive / ping
-            await websocket.receive_text()
+            await websocket.receive_text()  # keepalive ping from client
     except WebSocketDisconnect:
         if websocket in connected_websockets:
             connected_websockets.remove(websocket)
@@ -514,6 +612,5 @@ async def websocket_endpoint(websocket: WebSocket):
             connected_websockets.remove(websocket)
 
 
-# Store the running asyncio loop for threadsafe WebSocket broadcasts
+# background threads need this to push events to the asyncio WebSocket loop
 event_loop = asyncio.get_event_loop()
-

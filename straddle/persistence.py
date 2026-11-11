@@ -1,7 +1,7 @@
 """
-Persistent state manager for the BTC Options Straddle system.
-Guarantees zero data loss on browser refresh or server restart.
-Persists active positions, live valuation, trade history, cumulative PnL, and structured logs.
+Saves trade state to disk so nothing is lost if the server restarts.
+All writes go through a lock (thread-safe) and use atomic file replacement
+to prevent corruption if the process crashes mid-write.
 """
 
 import json
@@ -15,7 +15,8 @@ STATE_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "s
 
 class StatePersistence:
     """
-    Thread-safe JSON persistence layer for trading session state and logs.
+    Thread-safe JSON persistence for trading session state.
+    One global instance is shared across the FastAPI server and background strategy thread.
     """
 
     def __init__(self, filepath: str = STATE_FILE):
@@ -25,6 +26,7 @@ class StatePersistence:
         self.state: Dict[str, Any] = self._load_initial_state()
 
     def _default_state(self) -> Dict[str, Any]:
+        """Clean slate when starting a fresh session with no prior data on disk."""
         return {
             "active_trade": None,
             "orders": [],
@@ -39,11 +41,14 @@ class StatePersistence:
         }
 
     def _load_initial_state(self) -> Dict[str, Any]:
+        """
+        Tries to load existing state from disk on startup.
+        If the file is missing or corrupted, we start with a clean default state.
+        """
         if os.path.exists(self.filepath):
             try:
                 with open(self.filepath, "r", encoding="utf-8") as f:
                     data = json.load(f)
-                    # Validate keys
                     if "logs" in data and "stats" in data:
                         return data
             except Exception:
@@ -53,6 +58,10 @@ class StatePersistence:
         return state
 
     def _save_to_disk(self, state: Dict[str, Any]) -> None:
+        """
+        Writes state to a temp file first, then atomically replaces the real file.
+        This way a crash mid-write never leaves a partially-written (corrupt) state file.
+        """
         try:
             tmp_path = f"{self.filepath}.tmp"
             with open(tmp_path, "w", encoding="utf-8") as f:
@@ -72,7 +81,10 @@ class StatePersistence:
         pnl_pct: Optional[float] = None,
         pnl_usd: Optional[float] = None,
     ) -> Dict[str, Any]:
-        """Add a structured log entry and persist it."""
+        """
+        Appends a structured log entry and immediately persists it to disk.
+        We cap the buffer at 300 entries so memory doesn't grow unbounded over long sessions.
+        """
         with self.lock:
             log_entry = {
                 "id": len(self.state["logs"]) + 1,
@@ -85,14 +97,13 @@ class StatePersistence:
                 "pnl_usd": pnl_usd,
             }
             self.state["logs"].append(log_entry)
-            # Keep last 300 logs
             if len(self.state["logs"]) > 300:
                 self.state["logs"] = self.state["logs"][-300:]
             self._save_to_disk(self.state)
             return log_entry
 
     def set_active_trade(self, trade_data: Dict[str, Any]) -> None:
-        """Set or replace active straddle trade information."""
+        """Stores the current open straddle trade. Overwrites any previous active trade."""
         with self.lock:
             trade_data["started_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
             trade_data["is_active"] = True
@@ -109,7 +120,7 @@ class StatePersistence:
         pnl_pct: float,
         pnl_usd: float,
     ) -> None:
-        """Update live pricing and PnL for active trade."""
+        """Updates the live bid/ask prices and PnL on the active trade. Called every 5 seconds."""
         with self.lock:
             if self.state["active_trade"]:
                 self.state["active_trade"].update(
@@ -127,7 +138,10 @@ class StatePersistence:
                 self._save_to_disk(self.state)
 
     def close_active_trade(self, reason: str, exit_buyback: float, pnl_pct: float, pnl_usd: float) -> Optional[Dict[str, Any]]:
-        """Record trade closure and append to trade history."""
+        """
+        Archives the completed trade into history and updates session-level win/loss stats.
+        Called when the strategy exits via SL, TP, or manual stop.
+        """
         with self.lock:
             trade = self.state["active_trade"]
             if not trade:
@@ -150,7 +164,6 @@ class StatePersistence:
             self.state["trade_history"].append(completed_record)
             self.state["active_trade"] = None
 
-            # Update stats
             stats = self.state["stats"]
             stats["total_trades"] += 1
             if pnl_usd > 0:
@@ -171,12 +184,15 @@ class StatePersistence:
         avg_price: float,
         status: str,
     ) -> Dict[str, Any]:
-        """Record or update an order entry."""
+        """
+        Upserts an order into the persistent audit log.
+        If an order with the same ID already exists (e.g. SUBMITTED → FILLED), we update it in-place.
+        Otherwise we create a new record and cap the list at 100 entries.
+        """
         with self.lock:
             if "orders" not in self.state:
                 self.state["orders"] = []
-            
-            # Find existing order by id
+
             existing = next((o for o in self.state["orders"] if o["order_id"] == order_id), None)
             if existing:
                 existing.update({
@@ -204,17 +220,19 @@ class StatePersistence:
             return order_entry
 
     def clear_active_trade(self) -> None:
-        """Clear active trade without recording (e.g. manual reset)."""
+        """Clears the active trade without recording it to history. Used for manual resets."""
         with self.lock:
             self.state["active_trade"] = None
             self._save_to_disk(self.state)
 
     def get_full_state(self) -> Dict[str, Any]:
-        """Return snapshot of complete session state for frontend rehydration."""
+        """
+        Returns a deep copy of the full state dict.
+        We serialize + deserialize via JSON to avoid exposing internal references to callers.
+        """
         with self.lock:
             return json.loads(json.dumps(self.state))
 
 
-# Global singleton instance
+# Single shared instance used by both the FastAPI server and the execution manager
 state_persistence = StatePersistence()
-

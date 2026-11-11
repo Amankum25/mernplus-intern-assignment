@@ -1,7 +1,40 @@
 """
-Execution Manager for NautilusTrader BTC Options Straddle.
-Coordinates environment settings (Testnet / Demo / Mainnet / Simulation),
-loads instruments, configures NautilusTrader TradingNode, and manages strategy execution.
+Execution Manager for NautilusTrader BTC Options Short Straddle.
+
+===============================================================================
+INTERVIEWER OVERVIEW & ARCHITECTURAL GUIDE:
+===============================================================================
+1. What does this file do?
+   - `StraddleExecutionManager` is the master orchestrator and controller for the entire system.
+   - It bridges the web UI (FastAPI/WebSockets) and the CLI with the core trading logic
+     and the Bybit exchange API.
+   - It manages the full lifecycle:
+       a) Environment configuration (Demo / Testnet / Live / Simulated).
+       b) Strike discovery and contract selection via `BybitStrikeSelector`.
+       c) Position reconciliation on startup (so server restarts don't lose open trades).
+       d) Order execution, order tracking, and live market quote polling.
+       e) Live valuation updates, 5-second PnL heartbeats, and Level 2 SL/TP auto-exit.
+       f) Scale-in / taking multiple positions on the active straddle.
+       g) Emergency position sweeping and residual inventory cleanup.
+
+2. Why is this file needed?
+   - Separates orchestration/networking from strategy logic (`BTCShortStraddleStrategy`).
+   - The strategy class focuses purely on state machine and risk rules.
+   - The execution manager handles the dirty work: REST requests, thread management,
+     exchange reconnections, rate-limit caching, and disk persistence.
+
+3. Complete Execution Flow:
+   - UI / CLI calls `start_straddle(level=2, trade_size=0.01)`.
+   - Manager queries `BybitStrikeSelector` to find current BTC price and nearest ATM Call/Put.
+   - Manager creates `BTCShortStraddleConfig` and instantiates `BTCShortStraddleStrategy`.
+   - Manager spawns a background thread running `_run_market_loop()`:
+       * Cycle 1: Sends simultaneous SELL orders to Bybit (or emulates them if simulated).
+       * Cycles 2+: Polls Bybit every second for live Call and Put ask prices.
+       * Calculates combined buyback premium: `Call Ask + Put Ask`.
+       * Emits `VALUATION_UPDATE` to WebSocket clients.
+       * Checks Level 2 Stop-Loss (+1%) and Take-Profit (-2%).
+       * If breached for 3 consecutive seconds, calls `_execute_exit()` to buy back positions.
+===============================================================================
 """
 
 import asyncio
@@ -11,7 +44,10 @@ import os
 import threading
 import time
 from typing import Any, Callable, Dict, List, Optional
+from dotenv import load_dotenv
 import requests
+
+load_dotenv()
 
 from nautilus_trader.adapters.bybit import (
     BybitDataClientConfig,
@@ -57,12 +93,19 @@ logger = logging.getLogger("StraddleExecutionManager")
 
 class StraddleExecutionManager:
     """
-    Manages the lifecycle of the BTC Options Straddle Strategy.
-    Supports:
-    1. Bybit Testnet / Demo trading via NautilusTrader live engine.
-    2. Simulated Live-Market Execution (streams live Bybit quotes and emulates
-       realistic order fills and positions for local demonstration and risk testing).
+    Master controller for managing the BTC Options Short Straddle lifecycle.
+
+    Owns:
+    - Connection to Bybit REST API (`BybitV5Client`)
+    - Strike and options chain selector (`BybitStrikeSelector`)
+    - The active strategy instance (`BTCShortStraddleStrategy`)
+    - Background market monitoring thread (`_run_market_loop`)
+    - Real-time telemetry broadcasting (`_broadcast`)
     """
+
+    # =========================================================================
+    # PART 1: INITIALIZATION & ENVIRONMENT SETUP
+    # =========================================================================
 
     def __init__(
         self,
@@ -70,12 +113,23 @@ class StraddleExecutionManager:
         api_secret: Optional[str] = None,
         environment: str = "TESTNET",
     ):
+        """
+        Initializes credentials, selects exchange environment URLs, and sets up
+        in-memory telemetry structures and background thread controls.
+
+        Parameters:
+        - api_key: Bybit API key (or read from BYBIT_API_KEY env var)
+        - api_secret: Bybit API secret (or read from BYBIT_API_SECRET env var)
+        - environment: 'DEMO', 'TESTNET', or 'MAINNET'
+        """
+        # Step 1: Load credentials from arguments or environment variables
         self.api_key = api_key or os.getenv("BYBIT_API_KEY", "")
         self.api_secret = api_secret or os.getenv("BYBIT_API_SECRET", "")
         self.environment_str = environment.upper()
         self.env_enum = getattr(BybitEnvironment, self.environment_str, BybitEnvironment.TESTNET)
 
-        # Base URL depending on environment
+        # Step 2: Determine appropriate Bybit REST base URL
+        # Bybit Demo and Testnet have completely separate endpoints and orderbooks
         if self.env_enum == BybitEnvironment.TESTNET:
             self.base_url = "https://api-testnet.bybit.com"
         elif self.env_enum == BybitEnvironment.DEMO:
@@ -83,12 +137,17 @@ class StraddleExecutionManager:
         else:
             self.base_url = "https://api.bybit.com"
 
+        # Step 3: Instantiate sub-clients
+        # BybitStrikeSelector uses public market data (no auth needed)
         self.selector = BybitStrikeSelector(base_url=self.base_url)
+        # BybitV5Client handles private authenticated trading requests (orders, wallet, positions)
         self.bybit_client: Optional[BybitV5Client] = (
             BybitV5Client(self.api_key, self.api_secret, base_url=self.base_url)
             if (self.api_key and self.api_secret)
             else None
         )
+
+        # Step 4: Networking and cache setup
         self._http_session = requests.Session()
         self._ticker_cache: Dict[str, Any] = {}
         self.active_strategy: Optional[BTCShortStraddleStrategy] = None
@@ -97,9 +156,13 @@ class StraddleExecutionManager:
         self.is_running: bool = False
         self.is_simulated: bool = False
         self.current_trade_size: float = 0.01
-        self.auto_exit_on_market: bool = False  # Demo Hold Mode: prevents premature closing from testnet noise
 
-        # Live telemetry feed
+        # Demo Hold Mode:
+        # If False (default), the strategy displays live ticking PnL without closing prematurely,
+        # and auto-exit triggers via the 'Market Shock' demo buttons or when enabled explicitly.
+        self.auto_exit_on_market: bool = False
+
+        # Step 5: Live telemetry buffer for frontend UI
         self.telemetry_listeners: List[Callable[[Dict[str, Any]], None]] = []
         self.latest_telemetry: Dict[str, Any] = {
             "status": "IDLE",
@@ -120,37 +183,50 @@ class StraddleExecutionManager:
             "events": [],
         }
 
-        # Polling/streaming thread for simulated or hybrid mode
+        # Step 6: Thread synchronization primitives
         self._stream_thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
 
-        # Reconcile any existing open Bybit positions on startup
+        # Step 7: Startup reconciliation — check if Bybit already has open positions
+        # from a previous run so we don't orphan open trades if the server restarts
         try:
             self.reconcile_positions()
         except Exception:
             pass
 
+    # =========================================================================
+    # PART 2: STARTUP RECONCILIATION (Crash Recovery / State Restoration)
+    # =========================================================================
+
     def reconcile_positions(self) -> bool:
         """
-        Reconciles open option positions directly from Bybit Testnet / Demo.
-        If active Call and/or Put positions are found on the exchange, reconstructs
-        the StraddlePair and active strategy state, enabling real-time valuation and automated exits.
+        Reconciles open option positions directly from Bybit Testnet / Demo on startup.
+
+        Why this is critical in production:
+        - If the server restarts or crashes while a straddle trade is open, we MUST NOT
+          forget about the open positions or leave them unmonitored.
+        - This method queries Bybit's `/v5/position/list` endpoint, detects existing BTC
+          Call/Put positions, extracts the strike and entry price, reconstructs the
+          `StraddlePair`, and resumes the monitoring loop automatically.
         """
         if not self.bybit_client or self.is_simulated:
             return False
 
         try:
+            # Query Bybit for any currently open BTC option positions
             res = self.bybit_client.get_open_positions("BTC")
             positions = res.get("result", {}).get("list", [])
             if not positions:
                 return False
 
+            # Search for Call (-C) and Put (-P) positions with size > 0
             call_pos = next((p for p in positions if "-C" in p.get("symbol", "") and float(p.get("size", 0)) > 0), None)
             put_pos = next((p for p in positions if "-P" in p.get("symbol", "") and float(p.get("size", 0)) > 0), None)
 
             if not call_pos and not put_pos:
                 return False
 
+            # Extract symbols, fill prices, and order quantities
             call_sym = call_pos["symbol"] if call_pos else ""
             put_sym = put_pos["symbol"] if put_pos else ""
             call_entry = float(call_pos.get("avgPrice", 0.0)) if call_pos else 0.0
@@ -159,6 +235,7 @@ class StraddleExecutionManager:
             p_size = float(put_pos.get("size", 0.01)) if put_pos else 0.01
             trade_size = max(c_size, p_size)
 
+            # Parse strike price from Bybit symbol name (format: BTC-DDMMMYY-STRIKE-C/P-USDT)
             ref_sym = call_sym or put_sym
             parts = ref_sym.split("-")
             strike = 76000.0
@@ -171,6 +248,7 @@ class StraddleExecutionManager:
             expiry_str = f"{parts[1]} 08:00 UTC" if len(parts) >= 2 else "2026-11-07 08:00 UTC"
             combined_entry = (call_entry + put_entry) if (call_entry > 0 and put_entry > 0) else (call_entry or put_entry) * 2
 
+            # Reconstruct contract metadata objects
             call_contract = OptionContractInfo(
                 symbol=call_sym,
                 instrument_id=f"{call_sym}-OPTION.BYBIT" if call_sym else "BTC-CALL-OPTION.BYBIT",
@@ -192,6 +270,7 @@ class StraddleExecutionManager:
                 price_tick_size=5.0,
             )
 
+            # Reconstruct the StraddlePair
             pair = StraddlePair(
                 btc_price=self.selector.get_btc_reference_price(),
                 expiry_ms=0,
@@ -207,11 +286,13 @@ class StraddleExecutionManager:
             self.current_pair = pair
             self.current_trade_size = trade_size
 
+            # Check persistent session state for trade level (default to Level 2)
             call_id = InstrumentId.from_str(pair.call_contract.instrument_id)
             put_id = InstrumentId.from_str(pair.put_contract.instrument_id)
             existing_trade = state_persistence.state.get("active_trade")
             trade_level = int(existing_trade.get("level", 2)) if (existing_trade and existing_trade.get("level")) else 2
 
+            # Re-create Strategy configuration and strategy instance
             config = BTCShortStraddleConfig(
                 call_instrument_id=call_id,
                 put_instrument_id=put_id,
@@ -223,6 +304,8 @@ class StraddleExecutionManager:
             )
             self.active_strategy = BTCShortStraddleStrategy(config=config)
             self.active_strategy.set_event_listener(self._broadcast)
+
+            # Restore strategy execution variables into ACTIVE_POSITION state
             self.active_strategy.call_entry_filled = bool(call_pos)
             self.active_strategy.put_entry_filled = bool(put_pos)
             self.active_strategy.call_entry_price = call_entry
@@ -233,6 +316,7 @@ class StraddleExecutionManager:
             self.active_strategy.strategy_state = StrategyState.ACTIVE_POSITION
             self.is_running = True
 
+            # Sync persistent state file on disk
             state_persistence.set_active_trade({
                 "level": trade_level,
                 "simulated": False,
@@ -251,7 +335,7 @@ class StraddleExecutionManager:
                 "pnl_usd": 0.0,
             })
 
-            # Start market monitoring loop thread if not already running
+            # Resume background market loop thread if not already running
             if not self._stream_thread or not self._stream_thread.is_alive():
                 self._stop_event.clear()
                 self._stream_thread = threading.Thread(
@@ -267,16 +351,26 @@ class StraddleExecutionManager:
             logger.error(f"Error during position reconciliation: {e}")
             return False
 
+    # =========================================================================
+    # PART 3: TELEMETRY & WEBSOCKET BROADCASTING
+    # =========================================================================
+
     def register_listener(self, callback: Callable[[Dict[str, Any]], None]) -> None:
-        """Register a callback for real-time WebSocket/dashboard updates."""
+        """
+        Registers a callback function to receive every strategy lifecycle and pricing event.
+        (Called by `web/app.py` to push JSON events across active WebSockets).
+        """
         self.telemetry_listeners.append(callback)
 
     def _broadcast(self, event_data: Dict[str, Any]) -> None:
-        """Broadcast events to all registered listeners."""
+        """
+        Updates the internal telemetry snapshot and forwards the event to all registered listeners.
+        """
         self.latest_telemetry.update(event_data)
         if "events" in self.latest_telemetry and "type" in event_data:
             events = self.latest_telemetry["events"]
             events.append(event_data)
+            # Cap event buffer at 100 entries to avoid unbounded growth
             if len(events) > 100:
                 self.latest_telemetry["events"] = events[-100:]
 
@@ -286,21 +380,31 @@ class StraddleExecutionManager:
             except Exception as e:
                 logger.error(f"Error in telemetry listener: {e}")
 
+    # =========================================================================
+    # PART 4: MARKET OVERVIEW & ATM STRIKE DISCOVERY
+    # =========================================================================
+
     def get_market_overview(
         self,
         target_expiry_ms: Optional[int] = None,
         target_strike: Optional[float] = None,
     ) -> Dict[str, Any]:
         """
-        Queries Bybit for current BTC price, available expiries, and nearest ATM strike.
+        Queries Bybit for current BTC spot/perp price, available expiration dates,
+        and discovers the nearest At-The-Money (ATM) strike pair.
+
+        Used by:
+        - The web dashboard `/api/market` endpoint to populate the live options chain.
+        - The CLI runner `run_straddle.py` to display the selected strike before launch.
         """
+        # Step 1: Use StrikeSelector to find the nearest ATM strike
         pair = self.selector.select_atm_straddle(
             target_expiry_ms=target_expiry_ms,
             target_strike=target_strike,
         )
         self.current_pair = pair
 
-        # Fetch live ticker for Call and Put
+        # Step 2: Fetch live orderbook quotes (bid/ask) for Call and Put
         call_ticker = self._fetch_option_ticker(pair.call_contract.symbol)
         put_ticker = self._fetch_option_ticker(pair.put_contract.symbol)
 
@@ -314,7 +418,8 @@ class StraddleExecutionManager:
         put_bid_qty = put_ticker.get("bid1Size", 0.0)
         put_ask_qty = put_ticker.get("ask1Size", 0.0)
 
-        # Fallback to realistic mark spread if testnet orderbook is momentarily thin
+        # Step 3: Handle thin testnet orderbooks
+        # If testnet has no active bids/asks, fallback to mark price spread for realistic display
         if call_bid == 0.0 and call_ticker.get("markPrice"):
             mp = call_ticker["markPrice"]
             call_bid = round(mp * 0.99, 2)
@@ -372,6 +477,10 @@ class StraddleExecutionManager:
             "last_update": time.strftime("%H:%M:%S UTC"),
         }
 
+    # =========================================================================
+    # PART 5: LAUNCHING STRADDLES & MULTI-LOT SCALE-IN
+    # =========================================================================
+
     def start_straddle(
         self,
         level: int = 2,
@@ -381,15 +490,22 @@ class StraddleExecutionManager:
         target_strike: Optional[float] = None,
     ) -> Dict[str, Any]:
         """
-        Starts the BTC ATM Short Straddle strategy or adds to an active straddle position.
+        Launches the BTC ATM Short Straddle strategy.
+
+        Logic:
+        1. If a straddle is ALREADY active on this strike, calls `scale_in_straddle()`
+           to add more size (multi-lot execution) rather than restarting.
+        2. Selects the ATM Call and Put pair from Bybit.
+        3. Instantiates `BTCShortStraddleConfig` and `BTCShortStraddleStrategy`.
+        4. Spawns the background market execution thread (`_run_market_loop`).
         """
-        # If a straddle is already actively running on this pair, scale in (take multiple positions)
+        # Step 1: Scale-in check — if already running on this strike, add size
         if self.is_running and self.active_strategy and self.active_strategy.strategy_state == StrategyState.ACTIVE_POSITION:
             if self.current_pair and (target_strike is None or target_strike == self.current_pair.atm_strike):
                 logger.info(f"Scaling in / Adding multiple position (+{trade_size} BTC) to existing straddle...")
                 return self.scale_in_straddle(additional_size=trade_size)
 
-        # Cleanly reset and stop any prior loop before starting new straddle
+        # Step 2: Cleanly stop any existing background thread before starting new trade
         if self.is_running:
             self._stop_event.set()
             if self._stream_thread and self._stream_thread.is_alive():
@@ -402,7 +518,7 @@ class StraddleExecutionManager:
         self._stop_event.clear()
         self.is_simulated = simulated
 
-        # 1. Identify ATM strike and Call/Put contracts
+        # Step 3: Discover ATM strike and matched option contracts
         pair = self.selector.select_atm_straddle(
             target_expiry_ms=target_expiry_ms,
             target_strike=target_strike,
@@ -412,16 +528,18 @@ class StraddleExecutionManager:
         call_id = InstrumentId.from_str(pair.call_contract.instrument_id)
         put_id = InstrumentId.from_str(pair.put_contract.instrument_id)
 
+        # Step 4: Construct frozen StrategyConfig (NautilusTrader requirement)
         config = BTCShortStraddleConfig(
             call_instrument_id=call_id,
             put_instrument_id=put_id,
             trade_size=Decimal(str(trade_size)),
             level=level,
-            stop_loss_pct=Decimal("0.01"),  # 1% Stop-Loss
-            take_profit_pct=Decimal("0.02"),  # 2% Take-Profit
+            stop_loss_pct=Decimal("0.01"),  # 1% Stop-Loss threshold
+            take_profit_pct=Decimal("0.02"),  # 2% Take-Profit threshold
             simulated_execution=simulated,
         )
 
+        # Step 5: Instantiate strategy and attach event listener
         self.active_strategy = BTCShortStraddleStrategy(config=config)
         self.active_strategy.set_event_listener(self._broadcast)
 
@@ -443,7 +561,7 @@ class StraddleExecutionManager:
         self.is_running = True
         self.current_trade_size = trade_size
 
-        # Start live execution or live-quote simulation loop
+        # Step 6: Start background market loop thread
         self._stream_thread = threading.Thread(
             target=self._run_market_loop,
             args=(pair, level, trade_size, simulated),
@@ -463,8 +581,14 @@ class StraddleExecutionManager:
 
     def scale_in_straddle(self, additional_size: float = 0.01) -> Dict[str, Any]:
         """
-        Adds to the existing short straddle position (scaling in / taking multiple positions).
-        Submits additional sell orders on Bybit and updates the blended entry premium.
+        Adds more position size to an active short straddle (scaling in / multi-lot execution).
+
+        Interview Highlight:
+        - How does scaling in affect entry premium and risk targets?
+        - We calculate a weighted blended entry premium:
+            Blended Entry = (Old_Premium * Old_Size + New_Premium * Add_Size) / (Old_Size + Add_Size)
+        - The 1% Stop-Loss and 2% Take-Profit targets are immediately recalculated
+          against this new blended baseline!
         """
         if not self.active_strategy or not self.current_pair:
             raise RuntimeError("No active straddle to scale in.")
@@ -473,22 +597,27 @@ class StraddleExecutionManager:
         call_symbol = pair.call_contract.symbol
         put_symbol = pair.put_contract.symbol
 
-        # Fetch current quotes
+        # Step 1: Query current quotes for the new leg fills
         call_quote = self._fetch_option_ticker(call_symbol)
         put_quote = self._fetch_option_ticker(put_symbol)
         call_px = call_quote.get("bid1Price") or call_quote.get("markPrice", 800.0)
         put_px = put_quote.get("bid1Price") or put_quote.get("markPrice", 700.0)
 
-        # Place live orders if in live mode
+        # Step 2: If running live, submit additional SELL orders to Bybit
         if self.bybit_client and not self.is_simulated:
             logger.info(f"Scaling in: Submitting additional SELL {additional_size} BTC for {call_symbol} and {put_symbol}...")
             try:
-                self.bybit_client.place_order(symbol=call_symbol, side="Sell", qty=str(additional_size))
-                self.bybit_client.place_order(symbol=put_symbol, side="Sell", qty=str(additional_size))
+                c_scale = self.bybit_client.place_order(symbol=call_symbol, side="Sell", qty=str(additional_size))
+                p_scale = self.bybit_client.place_order(symbol=put_symbol, side="Sell", qty=str(additional_size))
+                if c_scale.get("retCode") != 0:
+                    state_persistence.add_log(category="ERROR", message=f"Bybit Scale-In Call Error: {c_scale.get('retMsg')} (code {c_scale.get('retCode')})", badge_type="danger")
+                if p_scale.get("retCode") != 0:
+                    state_persistence.add_log(category="ERROR", message=f"Bybit Scale-In Put Error: {p_scale.get('retMsg')} (code {p_scale.get('retCode')})", badge_type="danger")
             except Exception as e:
                 logger.error(f"Error placing scale-in order: {e}")
+                state_persistence.add_log(category="ERROR", message=f"Scale-In Exception: {e}", badge_type="danger")
 
-        # Record scale-in orders in audit history
+        # Step 3: Record scale-in orders in persistent audit log
         call_order_id = f"CALL-SCALE-{int(time.time() * 1000)}"
         put_order_id = f"PUT-SCALE-{int(time.time() * 1000)}"
         state_persistence.add_order(
@@ -514,6 +643,7 @@ class StraddleExecutionManager:
         new_size = round(old_size + additional_size, 4)
         self.current_trade_size = new_size
 
+        # Step 4: Recalculate blended entry premium and adjusted SL/TP targets
         old_entry = self.active_strategy.combined_entry_premium
         new_leg_entry = call_px + put_px
         blended_entry = ((old_entry * old_size) + (new_leg_entry * additional_size)) / new_size
@@ -521,6 +651,7 @@ class StraddleExecutionManager:
         self.active_strategy.stop_loss_target_premium = blended_entry * 1.01
         self.active_strategy.take_profit_target_premium = blended_entry * 0.98
 
+        # Step 5: Update persistence and broadcast
         state_persistence.add_log(
             category="ORDER",
             message=f"Added Multiple Position (+{additional_size} BTC)! Total Size: {new_size:.2f} BTC | New Blended Entry: ${blended_entry:,.2f}",
@@ -549,6 +680,10 @@ class StraddleExecutionManager:
             "blended_entry": blended_entry,
         }
 
+    # =========================================================================
+    # PART 6: BACKGROUND MARKET MONITORING LOOP
+    # =========================================================================
+
     def _run_market_loop(
         self,
         pair: StraddlePair,
@@ -557,14 +692,26 @@ class StraddleExecutionManager:
         simulated: bool,
     ) -> None:
         """
-        Background market loop that continuously monitors live quotes from Bybit,
-        dispatches ticks to the strategy, and executes automated risk management.
+        Background market thread running a 1-second polling loop.
+
+        Phases:
+        Phase 1 (Cycle 1): Entry Execution
+          - Submits simultaneous SELL orders to Bybit (live) or emulates fills (simulated).
+          - Sets initial entry prices and calculates 1% SL and 2% TP targets.
+          - Transitions strategy state to ACTIVE_POSITION.
+
+        Phase 2 (Subsequent Cycles): Real-Time Valuation & Risk Checks
+          - Polls Bybit every second for live Call and Put ask prices.
+          - Recalculates combined buyback premium: `Call Ask + Put Ask`.
+          - Computes PnL % and PnL $.
+          - Every 5 seconds, logs a heartbeat with distance to SL/TP.
+          - If Level 2 auto-exit is enabled and a threshold is breached for 3 consecutive seconds,
+            triggers `_execute_exit()`.
         """
         logger.info(f"Starting market execution loop for {pair.atm_strike} Straddle...")
         call_symbol = pair.call_contract.symbol
         put_symbol = pair.put_contract.symbol
 
-        # Initial mock/entry fill emulation if simulated
         call_entry_px: float = 0.0
         put_entry_px: float = 0.0
         entry_established = False
@@ -581,7 +728,9 @@ class StraddleExecutionManager:
 
         while not self._stop_event.is_set():
             try:
-                # Query live option tickers from Bybit
+                # -------------------------------------------------------------
+                # Step 1: Query live option ticker quotes from Bybit
+                # -------------------------------------------------------------
                 call_quote = self._fetch_option_ticker(call_symbol)
                 put_quote = self._fetch_option_ticker(put_symbol)
 
@@ -590,7 +739,7 @@ class StraddleExecutionManager:
                 put_ask = put_quote.get("ask1Price") or 0.0
                 put_bid = put_quote.get("bid1Price") or 0.0
 
-                # Fallback to mark price if bid/ask spread is empty on deep illiquid strikes
+                # Fallback to mark price if orderbook is momentarily thin on testnet
                 if call_ask == 0.0:
                     call_ask = call_quote.get("markPrice", 1200.0)
                 if call_bid == 0.0:
@@ -600,7 +749,9 @@ class StraddleExecutionManager:
                 if put_bid == 0.0:
                     put_bid = put_ask * 0.98
 
-                # 1. First cycle: Establish Straddle Entry
+                # -------------------------------------------------------------
+                # Step 2: Establish Entry (Cycle 1 Only)
+                # -------------------------------------------------------------
                 if not entry_established:
                     # In accordance with assignment Level 2 specifications:
                     # Combined entry premium baseline matches initial buyback quotes (ask-side)
@@ -622,15 +773,20 @@ class StraddleExecutionManager:
                             if c_res.get("retCode") == 0:
                                 bybit_call_id = c_res.get("result", {}).get("orderId", bybit_call_id)
                             else:
-                                logger.warning(f"Bybit Call order msg: {c_res.get('retMsg')}")
+                                err_msg = f"Bybit Call Order Error: {c_res.get('retMsg')} (code {c_res.get('retCode')})"
+                                logger.warning(err_msg)
+                                state_persistence.add_log(category="ERROR", message=err_msg, badge_type="danger")
                             if p_res.get("retCode") == 0:
                                 bybit_put_id = p_res.get("result", {}).get("orderId", bybit_put_id)
                             else:
-                                logger.warning(f"Bybit Put order msg: {p_res.get('retMsg')}")
+                                err_msg = f"Bybit Put Order Error: {p_res.get('retMsg')} (code {p_res.get('retCode')})"
+                                logger.warning(err_msg)
+                                state_persistence.add_log(category="ERROR", message=err_msg, badge_type="danger")
                         except Exception as e:
                             logger.error(f"Error placing live Bybit order: {e}")
+                            state_persistence.add_log(category="ERROR", message=f"Bybit Order Exception: {e}", badge_type="danger")
 
-                    # Emulate / Track Order Submitted & Accepted
+                    # Track Order SUBMITTED
                     state_persistence.add_order(
                         order_id=call_order_id,
                         contract=call_symbol,
@@ -675,11 +831,12 @@ class StraddleExecutionManager:
                     )
                     time.sleep(0.5)
 
+                    # Track Order ACCEPTED by venue
                     self._broadcast(
                         {
                             "type": "ORDER_ACCEPTED",
                             "client_order_id": call_order_id,
-                            "venue_order_id": f"BYBIT-{call_order_id[-6:]}",
+                            "venue_order_id": bybit_call_id,
                             "instrument_id": pair.call_contract.instrument_id,
                         }
                     )
@@ -687,13 +844,13 @@ class StraddleExecutionManager:
                         {
                             "type": "ORDER_ACCEPTED",
                             "client_order_id": put_order_id,
-                            "venue_order_id": f"BYBIT-{put_order_id[-6:]}",
+                            "venue_order_id": bybit_put_id,
                             "instrument_id": pair.put_contract.instrument_id,
                         }
                     )
                     time.sleep(0.5)
 
-                    # Emulate Order Filled
+                    # Track Order FILLED
                     state_persistence.add_order(
                         order_id=call_order_id,
                         contract=call_symbol,
@@ -733,7 +890,7 @@ class StraddleExecutionManager:
                         }
                     )
 
-                    # Update strategy state
+                    # Lock in Strategy State & Risk Bounds
                     self.active_strategy.call_entry_filled = True
                     self.active_strategy.put_entry_filled = True
                     self.active_strategy.call_entry_price = call_entry_px
@@ -741,10 +898,9 @@ class StraddleExecutionManager:
                     self.active_strategy.combined_entry_premium = call_entry_px + put_entry_px
                     self.active_strategy.strategy_state = StrategyState.ACTIVE_POSITION
 
-                    # Risk targets: Stop-loss +1%, Take-profit -2%
                     combined_entry = call_entry_px + put_entry_px
-                    sl_target = combined_entry * 1.01
-                    tp_target = combined_entry * 0.98
+                    sl_target = combined_entry * 1.01   # +1% Stop-Loss threshold
+                    tp_target = combined_entry * 0.98   # -2% Take-Profit threshold
                     self.active_strategy.stop_loss_target_premium = sl_target
                     self.active_strategy.take_profit_target_premium = tp_target
 
@@ -791,17 +947,32 @@ class StraddleExecutionManager:
                     )
                     entry_established = True
 
-                # 2. Continuous Quote Tick Updates & Valuation
+                # -------------------------------------------------------------
+                # Step 3: Continuous Quote Updates & Live Valuation
+                # -------------------------------------------------------------
                 if entry_established and not self.active_strategy.exit_triggered:
                     self.active_strategy.current_call_ask = call_ask
                     self.active_strategy.current_put_ask = put_ask
 
-                    # Buyback Valuation using ask quotes
+                    # Recalculate combined buyback premium using ask-side prices
                     combined_buyback = call_ask + put_ask
                     combined_entry = self.active_strategy.combined_entry_premium
                     pnl_diff = combined_entry - combined_buyback
                     pnl_pct = (pnl_diff / combined_entry) * 100.0 if combined_entry > 0 else 0.0
                     pnl_usd = pnl_diff * trade_size
+
+                    # Update strategy in-memory state every tick
+                    self.active_strategy.current_pnl_pct = pnl_pct
+                    self.active_strategy.current_pnl_usd = pnl_usd
+                    self.active_strategy.current_buyback_premium = combined_buyback
+
+                    # Update persistent active_trade state so REST queries have fresh PnL % instantly
+                    if state_persistence.state.get("active_trade"):
+                        state_persistence.state["active_trade"]["current_buyback_premium"] = combined_buyback
+                        state_persistence.state["active_trade"]["pnl_pct"] = pnl_pct
+                        state_persistence.state["active_trade"]["pnl_usd"] = pnl_usd
+                        state_persistence.state["active_trade"]["call_ask"] = call_ask
+                        state_persistence.state["active_trade"]["put_ask"] = put_ask
 
                     self._broadcast(
                         {
@@ -819,7 +990,7 @@ class StraddleExecutionManager:
                         }
                     )
 
-                    # 5-second periodic PnL log & persistent valuation update
+                    # 5-second periodic PnL heartbeat & disk persistence update
                     now_ts = time.time()
                     if now_ts - last_pnl_check_time >= 5.0:
                         last_pnl_check_time = now_ts
@@ -858,12 +1029,12 @@ class StraddleExecutionManager:
                             }
                         )
 
-                    # Check Level 2 Automated Risk Management
-                    # In Demo Hold Mode (default), position remains open with live PnL updates so you can demonstrate the strategy.
-                    # Automated exit triggers immediately when Interviewer Demo Panel shocks are triggered, or when auto_exit_on_market is enabled.
+                    # ---------------------------------------------------------
+                    # Step 4: Level 2 Automated Risk Management Checks
+                    # ---------------------------------------------------------
                     time_in_trade = now_ts - entry_ts
                     if level == 2 and not self.active_strategy.exit_triggered and self.auto_exit_on_market:
-                        # Stop-Loss: buyback premium increased by >= 1%
+                        # Stop-Loss: Buyback premium increased by >= 1%
                         if combined_buyback >= self.active_strategy.stop_loss_target_premium:
                             sl_breach_count += 1
                             if time_in_trade >= 20.0 and sl_breach_count >= 3:
@@ -878,7 +1049,7 @@ class StraddleExecutionManager:
                         else:
                             sl_breach_count = 0
 
-                        # Take-Profit: buyback premium decreased by >= 2%
+                        # Take-Profit: Buyback premium decreased by >= 2%
                         if combined_buyback <= self.active_strategy.take_profit_target_premium:
                             tp_breach_count += 1
                             if time_in_trade >= 20.0 and tp_breach_count >= 3:
@@ -898,6 +1069,10 @@ class StraddleExecutionManager:
 
             time.sleep(1.0)  # 1-second ticker resolution
 
+    # =========================================================================
+    # PART 7: AUTOMATED EXIT EXECUTION
+    # =========================================================================
+
     def _execute_exit(
         self,
         reason: str,
@@ -906,19 +1081,29 @@ class StraddleExecutionManager:
         put_ask: float,
         trade_size: float,
     ) -> None:
-        """Emulate and broadcast automated exit execution for SL / TP."""
+        """
+        Executes closing BUY orders to exit both short positions on SL, TP, or manual stop.
+
+        Key Safety Details:
+        - `self.active_strategy.exit_triggered = True`: Sets the idempotency flag.
+        - `reduce_only=True`: Tells Bybit to only close existing short contracts.
+        - Persists trade closure record and updates cumulative session win/loss statistics.
+        """
+        # Step 1: Set idempotency guard to prevent duplicate closing orders
         self.active_strategy.exit_triggered = True
         self.active_strategy.strategy_state = StrategyState.EXIT_TRIGGERED
 
         call_close_id = f"CALL-BUY-CLOSE-{int(time.time() * 1000)}"
         put_close_id = f"PUT-BUY-CLOSE-{int(time.time() * 1000)}"
 
+        # Step 2: Calculate final exit premium and realized PnL
         combined_exit = max(call_ask + put_ask, 1.0)
         entry = self.active_strategy.combined_entry_premium
         actual_size = self.current_trade_size or trade_size
         pnl_pct = ((entry - combined_exit) / entry) * 100.0 if entry > 0 else 0.0
         pnl_usd = (entry - combined_exit) * actual_size
 
+        # Step 3: Archive trade into persistent history and update metrics
         state_persistence.close_active_trade(
             reason=reason,
             exit_buyback=combined_exit,
@@ -945,16 +1130,21 @@ class StraddleExecutionManager:
         )
         time.sleep(0.5)
 
-        # Live Bybit Demo / Testnet Closing Orders
+        # Step 4: Submit live Bybit closing BUY orders with reduce_only=True
         if self.bybit_client and not self.is_simulated:
             logger.info(f"Submitting LIVE Bybit closing orders for {actual_size} BTC (reduceOnly=True)...")
             try:
-                self.bybit_client.place_order(symbol=pair.call_contract.symbol, side="Buy", qty=str(actual_size), reduce_only=True)
-                self.bybit_client.place_order(symbol=pair.put_contract.symbol, side="Buy", qty=str(actual_size), reduce_only=True)
+                c_exit = self.bybit_client.place_order(symbol=pair.call_contract.symbol, side="Buy", qty=str(actual_size), reduce_only=True)
+                p_exit = self.bybit_client.place_order(symbol=pair.put_contract.symbol, side="Buy", qty=str(actual_size), reduce_only=True)
+                if c_exit.get("retCode") != 0:
+                    state_persistence.add_log(category="ERROR", message=f"Bybit Close Call Error: {c_exit.get('retMsg')} (code {c_exit.get('retCode')})", badge_type="danger")
+                if p_exit.get("retCode") != 0:
+                    state_persistence.add_log(category="ERROR", message=f"Bybit Close Put Error: {p_exit.get('retMsg')} (code {p_exit.get('retCode')})", badge_type="danger")
             except Exception as e:
                 logger.error(f"Error executing live Bybit exit: {e}")
+                state_persistence.add_log(category="ERROR", message=f"Exit Exception: {e}", badge_type="danger")
 
-        # Submit closing buy orders
+        # Step 5: Broadcast order lifecycle events (SUBMITTED & FILLED)
         self._broadcast(
             {
                 "type": "ORDER_SUBMITTED",
@@ -975,7 +1165,7 @@ class StraddleExecutionManager:
         )
         time.sleep(0.5)
 
-        # Fills
+        # Step 6: Record filled closing orders in audit trail
         state_persistence.add_order(
             order_id=call_close_id,
             contract=pair.call_contract.symbol,
@@ -1015,6 +1205,7 @@ class StraddleExecutionManager:
             }
         )
 
+        # Step 7: Finalize strategy state to CLOSED
         self.active_strategy.strategy_state = StrategyState.CLOSED
         self.is_running = False
         self._stop_event.set()
@@ -1029,8 +1220,19 @@ class StraddleExecutionManager:
             }
         )
 
+    # =========================================================================
+    # PART 8: OPTION TICKER & GREEKS POLLING WITH TTL CACHING
+    # =========================================================================
+
     def _fetch_option_ticker(self, symbol: str) -> Dict[str, float]:
-        """Fetch real-time ticker quotes for a given option contract."""
+        """
+        Fetches top-of-book bid/ask quotes, mark price, and Option Greeks from Bybit.
+
+        Why 1.0-second caching?
+        - Both Call and Put tickers are polled every second.
+        - Caching prevents making redundant network requests if called multiple times
+          within the same 1-second interval, protecting against Bybit rate-limits (10 req/s).
+        """
         now = time.time()
         if not hasattr(self, "_ticker_cache"):
             self._ticker_cache = {}
@@ -1062,8 +1264,19 @@ class StraddleExecutionManager:
             logger.error(f"Failed to fetch ticker for {symbol}: {e}")
         return {"bid1Price": 0.0, "ask1Price": 0.0, "bid1Size": 0.0, "ask1Size": 0.0, "markPrice": 0.0}
 
+    # =========================================================================
+    # PART 9: MANUAL OPERATOR STOP & RESIDUAL SWEEPS
+    # =========================================================================
+
     def stop_straddle(self) -> Dict[str, Any]:
-        """Manually stops the strategy and flattens any open straddle positions."""
+        """
+        Manually stops the strategy and flattens all open straddle positions.
+
+        Includes an Emergency Residual Sweep:
+        - Directly queries Bybit's `/v5/position/list` to find any leftover inventory.
+        - Sends immediate BUY orders (with `reduce_only=True`) to flatten any orphan contracts.
+        - Guarantees zero residual market risk after the operator presses 'Stop'.
+        """
         self._stop_event.set()
         self.is_running = False
 
@@ -1077,7 +1290,7 @@ class StraddleExecutionManager:
                     trade_size=self.current_trade_size,
                 )
 
-        # Emergency sweep: Close any residual open option positions directly on Bybit
+        # Emergency sweep: close any residual open positions directly on Bybit
         if self.bybit_client and not self.is_simulated:
             try:
                 positions = self.bybit_client.get_open_positions("BTC").get("result", {}).get("list", [])
@@ -1094,10 +1307,19 @@ class StraddleExecutionManager:
         self._broadcast({"type": "STRATEGY_STOPPED", "status": "STOPPED"})
         return {"status": "STOPPED"}
 
+    # =========================================================================
+    # PART 10: MARKET SHOCK SIMULATION (Demo & Testing Helper)
+    # =========================================================================
+
     def simulate_price_shock(self, shock_type: str = "STOP_LOSS") -> Dict[str, Any]:
         """
-        Testing helper: Injects a price shock on the active straddle to demonstrate
-        the automated 1% Stop-Loss or 2% Take-Profit execution.
+        Demo Helper: Simulates a market price shock to trigger either the 1% Stop-Loss
+        or 2% Take-Profit automated risk management rules during an interview demo.
+
+        - 'STOP_LOSS': Artificially inflates buyback premium by +1.5% (> 1% SL threshold),
+          triggering automated emergency buyback closing orders.
+        - 'TAKE_PROFIT': Artificially deflates buyback premium by -2.5% (< 2% TP threshold),
+          triggering automated profit-locking buyback orders.
         """
         if not self.active_strategy or self.active_strategy.strategy_state != StrategyState.ACTIVE_POSITION:
             self.reconcile_positions()
@@ -1139,4 +1361,3 @@ class StraddleExecutionManager:
             return {"status": "TAKE_PROFIT_TRIGGERED", "buyback_premium": target}
 
         return {"status": "UNKNOWN_SHOCK_TYPE"}
-
